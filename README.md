@@ -38,13 +38,15 @@ Open `http://localhost:5015`. With `DEMO_MODE=true`, the seeded demo household i
 Nirvana is designed to run as another PM2 service behind the existing shared Nginx instance used by the other AthenaBot applications.
 
 ```bash
-npm ci --omit=dev
+rm -rf node_modules
+npm cache verify
+npm ci --omit=dev --registry=https://registry.npmjs.org --no-audit --no-fund
 npm run db:migrate
 pm2 start ecosystem.config.cjs --env production
 pm2 save
 ```
 
-The deployment guide includes the dedicated PostgreSQL role/database grants, the Nginx site block for port `5015`, and the Certbot certificate command. Do not install a second Nginx service.
+The deployment guide includes recovery from a stale `npm ci`, the dedicated PostgreSQL role/database grants, the Nginx site block for port `5015`, and the Certbot certificate command. The repository-level `.npmrc` and lockfile use the public npm registry. Do not install a second Nginx service.
 
 ## Plaid decision
 
@@ -67,5 +69,5 @@ Before public launch: obtain legal review of investment-advice positioning, add 
 
 - `docs/PHASE1_PRODUCT_DECISION.md` — what ships now and what is intentionally deferred
 - `docs/PLAID_PHASE2.md` — production Plaid architecture and security requirements
-- `docs/DEPLOYMENT.md` — PostgreSQL grants, PM2, shared Nginx, and Certbot deployment
+- `docs/DEPLOYMENT_EXISTING_NGINX.md` — exact deployment for the existing AthenaBot Nginx/PM2/PostgreSQL/Certbot server
 - `docs/BUILD_VALIDATION.md` — tests and smoke checks completed

@@ -2,8 +2,9 @@
 
 Completed for this Phase 1 scaffold:
 
-- Dependency resolution completed with `npm install --package-lock-only`.
-- Full dependency install completed with `npm ci`.
+- `package-lock.json` is valid lockfile v3 and all package tarball URLs point to `registry.npmjs.org`.
+- The repository includes `.npmrc` to force the public npm registry on the deployment host.
+- The application dependency set and tests were validated before packaging; the final public-registry lockfile should be installed on the internet-connected server with the command in the deployment guide.
 - Every JavaScript file passed `node --check`.
 - Five unit tests passed:
   - buy scenario portfolio conservation at execution
