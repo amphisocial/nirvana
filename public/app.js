@@ -596,9 +596,37 @@ function updateMessage(message, text) {
   if (body) body.textContent = text;
   const mirrorBody = message.mirrorMessage?.querySelector('p');
   if (mirrorBody) mirrorBody.textContent = text;
+
+  const mainContainer = message.parentElement;
+  const drawerContainer = message.mirrorMessage?.parentElement;
+  if (mainContainer) mainContainer.scrollTop = mainContainer.scrollHeight;
+  if (drawerContainer) drawerContainer.scrollTop = drawerContainer.scrollHeight;
+}
+
+function setAssistantConversationMode(active = true) {
+  const intro = $('#assistantIntro');
+  const toggle = $('#assistantSuggestionsToggle');
+  if (!intro || !toggle) return;
+
+  intro.classList.toggle('collapsed', active);
+  toggle.classList.toggle('hidden', !active);
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.textContent = 'Suggested questions';
+}
+
+function toggleAssistantSuggestions() {
+  const intro = $('#assistantIntro');
+  const toggle = $('#assistantSuggestionsToggle');
+  if (!intro || !toggle) return;
+
+  const opening = intro.classList.contains('collapsed');
+  intro.classList.toggle('collapsed', !opening);
+  toggle.setAttribute('aria-expanded', String(opening));
+  toggle.textContent = opening ? 'Hide suggested questions' : 'Suggested questions';
 }
 
 async function askNirvana(text, button) {
+  setAssistantConversationMode(true);
   appendMessage('user', text);
   if (button) button.disabled = true;
   const pending = appendMessage('assistant', 'Researching and grounding the response…');
@@ -876,6 +904,7 @@ async function initialize() {
   $('#assistantToggle').addEventListener('click', () => setAssistantOpen(true));
   $('#assistantFab').addEventListener('click', () => setAssistantOpen(true));
   $('#assistantClose').addEventListener('click', () => setAssistantOpen(false));
+  $('#assistantSuggestionsToggle').addEventListener('click', toggleAssistantSuggestions);
 
   $$('[data-assistant-prompt]').forEach((button) => button.addEventListener('click', () => {
     $('#assistantForm').message.value = button.dataset.assistantPrompt;

@@ -592,3 +592,80 @@ body.sidebar-collapsed .mini-status { justify-content: center; padding-left: 0; 
   .portfolio-actions { width: 100%; }
   .portfolio-actions .button { flex: 1; }
 }
+
+
+/* AI assistant conversation-space fix — v0.4.1 */
+.assistant-drawer {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+.assistant-drawer-head,
+.assistant-input,
+.assistant-disclaimer,
+.assistant-prompts-toggle {
+  flex: 0 0 auto;
+}
+
+.assistant-intro {
+  flex: 0 0 auto;
+  max-height: 290px;
+  overflow: hidden;
+  opacity: 1;
+  transition: max-height .2s ease, opacity .15s ease, margin .2s ease;
+}
+
+.assistant-intro.collapsed {
+  max-height: 0;
+  opacity: 0;
+  margin: 0;
+  pointer-events: none;
+}
+
+.assistant-prompts-toggle {
+  align-self: flex-start;
+  margin: .65rem 0 .5rem;
+  padding: .38rem .65rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--blue-pale);
+  color: var(--blue-dark);
+  font-size: .72rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.assistant-prompts-toggle:hover {
+  border-color: var(--blue);
+  background: #fff;
+}
+
+.assistant-messages {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.assistant-input {
+  position: relative;
+  z-index: 2;
+}
+
+@media (max-height: 720px) {
+  .assistant-welcome {
+    margin: .65rem 0;
+  }
+
+  .assistant-suggestions {
+    gap: .3rem;
+    margin-bottom: .5rem;
+  }
+
+  .assistant-suggestions button {
+    padding: .45rem .6rem;
+  }
+}
