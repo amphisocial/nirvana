@@ -1,0 +1,76 @@
+# Nirvana Phase 1
+
+Nirvana is a personal finance and retirement-planning command center inspired by the strongest workflow patterns in Boldin, while deliberately keeping the first release small enough to ship and operate.
+
+## Phase 1 scope
+
+- Google sign-in and household profile
+- Manual account, liability, and holding entry
+- CSV holding import as the backup to account aggregation
+- Net worth, asset allocation, concentration, and holdings dashboards
+- Retirement projection with deterministic and Monte Carlo views
+- Stock trend charts for 3M, 6M, YTD, and 1Y
+- AI research chat with server-side Markdown skills and intent-based skill-agent routing
+- Portfolio buy/sell what-if scenarios without trade execution
+- Stripe-ready subscription hooks
+- Plaid-ready schema and feature flags, disabled by default
+- PM2 service named `nirvana`
+
+## Product boundary
+
+Nirvana Phase 1 is an educational planning and research product. It does not execute trades and should not call its outputs individualized investment advice. The AI explains model output; deterministic financial functions and market-data services perform the calculations.
+
+## Quick start
+
+```bash
+cp .env.example .env
+npm install
+npm run db:migrate
+npm run db:seed
+npm run dev
+```
+
+Open `http://localhost:5015`. With `DEMO_MODE=true`, the seeded demo household is used automatically.
+
+## Production
+
+```bash
+sudo mkdir -p /var/log/pm2
+npm ci --omit=dev
+npm run db:migrate
+pm2 start ecosystem.config.cjs --env production
+pm2 save
+```
+
+Recommended Apache proxy:
+
+```apache
+ProxyPreserveHost On
+ProxyPass / http://127.0.0.1:5015/
+ProxyPassReverse / http://127.0.0.1:5015/
+RequestHeader set X-Forwarded-Proto "https"
+```
+
+## Plaid decision
+
+Plaid is not required to launch. Phase 1 uses manual entry and CSV import. Phase 2 can enable Plaid Link, Transactions, Investments, and Liabilities behind `PLAID_ENABLED=true`. The database already contains a `plaid_items` table so migration does not require redesigning the household/account model.
+
+## Market data
+
+`MARKET_DATA_PROVIDER=mock` makes local development deterministic. Set `MARKET_DATA_PROVIDER=alphavantage` and add `ALPHAVANTAGE_API_KEY` for live historical data. The provider uses daily history for 3M and weekly-adjusted history for longer windows so 6M/YTD charts do not depend on a premium full-daily-history response.
+
+## AI skills
+
+Skills are plain Markdown files in `server/skills`. Enable or disable them with `AI_ENABLED_SKILLS`. The server routes each prompt to the relevant enabled skill-agents (personal finance, retirement, stock research, and portfolio scenarios) and loads only those Markdown instructions. This keeps behavior editable without changing application code while avoiding an expensive autonomous multi-agent swarm in Phase 1.
+
+## Important next hardening steps
+
+Before public launch: obtain legal review of investment-advice positioning, add a privacy policy and data retention controls, encrypt any future Plaid access tokens with a managed key, add audit logging, add provider-specific market-data attribution, and complete penetration/security testing.
+
+
+## Documentation
+
+- `docs/PHASE1_PRODUCT_DECISION.md` — what ships now and what is intentionally deferred
+- `docs/PLAID_PHASE2.md` — production Plaid architecture and security requirements
+- `docs/DEPLOYMENT.md` — PM2 and reverse-proxy deployment
+- `docs/BUILD_VALIDATION.md` — tests and smoke checks completed

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Nirvana personal finance, retirement planning, and market research.">
+  <title>Nirvana — See your financial path</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="landing-body">
+  <header class="landing-nav">
+    <a class="brand" href="/" aria-label="Nirvana home"><span class="brand-mark">N</span><span>Nirvana</span></a>
+    <a class="text-link" href="#features">Explore features</a>
+  </header>
+  <main>
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">PLAN WITH CLARITY</p>
+        <h1>Your money, investments, and retirement path—in one calm view.</h1>
+        <p class="hero-lede">Track net worth, test retirement choices, research investments, and explore portfolio scenarios without handing over trade authority.</p>
+        <div class="hero-actions">
+          <a id="primaryLogin" class="button button-primary" href="/auth/google">Continue with Google</a>
+          <a id="demoLogin" class="button button-secondary hidden" href="/app.html">Open demo</a>
+        </div>
+        <p id="authNote" class="muted">Secure sign-in. Your financial inputs remain private to your household.</p>
+      </div>
+      <div class="hero-panel" aria-label="Illustrative dashboard preview">
+        <div class="preview-head"><span>Financial overview</span><span class="status-pill">On track</span></div>
+        <div class="preview-value">$1,284,600</div>
+        <div class="preview-sub">Estimated net worth</div>
+        <svg viewBox="0 0 520 200" role="img" aria-label="Illustrative rising net worth trend">
+          <defs><linearGradient id="area" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#5f7f70" stop-opacity=".34"/><stop offset="1" stop-color="#5f7f70" stop-opacity="0"/></linearGradient></defs>
+          <path d="M0 170 C55 150,75 158,120 130 S205 115,250 98 S335 82,380 54 S465 44,520 18 L520 200 L0 200Z" fill="url(#area)"/>
+          <path d="M0 170 C55 150,75 158,120 130 S205 115,250 98 S335 82,380 54 S465 44,520 18" fill="none" stroke="#4b7260" stroke-width="5" stroke-linecap="round"/>
+        </svg>
+        <div class="preview-grid"><div><strong>84%</strong><span>Plan success</span></div><div><strong>18 yrs</strong><span>To retirement</span></div><div><strong>6.5%</strong><span>Model return</span></div></div>
+      </div>
+    </section>
+
+    <section id="features" class="feature-section">
+      <div class="section-heading"><p class="eyebrow">PHASE 1 FOCUS</p><h2>Start with the decisions people revisit most.</h2></div>
+      <div class="feature-grid">
+        <article class="feature-card"><div class="feature-number">01</div><h3>Complete financial picture</h3><p>Manual accounts, liabilities, holdings, and CSV imports power a reliable net-worth baseline.</p></article>
+        <article class="feature-card"><div class="feature-number">02</div><h3>Retirement scenarios</h3><p>Deterministic projections and Monte Carlo ranges separate model math from AI explanation.</p></article>
+        <article class="feature-card"><div class="feature-number">03</div><h3>Research with evidence</h3><p>Ask about a ticker, see 3M, 6M, YTD, or 1Y charts, and review bull, bear, and uncertainty cases.</p></article>
+        <article class="feature-card"><div class="feature-number">04</div><h3>Portfolio what-ifs</h3><p>Model a hypothetical buy or sell at an execution price and a future target without placing a trade.</p></article>
+      </div>
+    </section>
+  </main>
+  <footer class="landing-footer"><span>© 2026 Nirvana</span><span>Educational planning and research—not financial advice.</span></footer>
+  <script src="/landing.js" defer></script>
+</body>
+</html>

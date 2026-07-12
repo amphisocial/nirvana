@@ -1,0 +1,33 @@
+{
+  "name": "nirvana-financial-planner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Nirvana Phase 1 personal finance, retirement planning, portfolio research, and scenario analysis platform.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node --watch server/index.js",
+    "start": "node server/index.js",
+    "db:migrate": "node scripts/migrate.js",
+    "db:seed": "node scripts/seed-demo.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "connect-pg-simple": "^10.0.0",
+    "csv-parse": "^5.6.0",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.0.1",
+    "express-session": "^1.18.2",
+    "helmet": "^8.1.0",
+    "multer": "^2.0.2",
+    "openai": "^5.12.2",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "pg": "^8.16.3",
+    "stripe": "^18.4.0",
+    "zod": "^3.25.76"
+  }
+}

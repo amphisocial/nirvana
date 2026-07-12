@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Nirvana financial planning dashboard">
+  <title>Nirvana Dashboard</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="app-body">
+  <aside class="sidebar">
+    <a class="brand brand-sidebar" href="/app.html"><span class="brand-mark">N</span><span>Nirvana</span></a>
+    <nav class="side-nav" aria-label="Primary">
+      <button class="nav-item active" data-view="overview"><span>Overview</span></button>
+      <button class="nav-item" data-view="retirement"><span>Retirement</span></button>
+      <button class="nav-item" data-view="scenario"><span>What-if Lab</span></button>
+      <button class="nav-item" data-view="research"><span>Research AI</span></button>
+      <button class="nav-item" data-view="accounts"><span>Accounts</span></button>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="mini-status"><span class="status-dot"></span><div><strong id="providerLabel">Loading…</strong><small>Data configuration</small></div></div>
+      <button id="logoutButton" class="nav-item secondary-nav">Sign out</button>
+    </div>
+  </aside>
+
+  <main class="app-main">
+    <header class="app-header">
+      <div><p class="eyebrow">FINANCIAL COMMAND CENTER</p><h1 id="pageTitle">Overview</h1></div>
+      <div class="header-actions"><span id="userLabel" class="user-chip">Loading…</span><button id="refreshButton" class="icon-button" aria-label="Refresh dashboard">↻</button></div>
+    </header>
+
+    <div id="globalAlert" class="alert hidden" role="alert"></div>
+
+    <section id="overview" class="view active-view">
+      <div class="metric-grid">
+        <article class="metric-card metric-featured"><span>Net worth</span><strong id="netWorthMetric">—</strong><small id="netWorthDelta">Assets minus liabilities</small></article>
+        <article class="metric-card"><span>Total assets</span><strong id="assetsMetric">—</strong><small id="accountCountMetric">— accounts</small></article>
+        <article class="metric-card"><span>Liabilities</span><strong id="liabilitiesMetric">—</strong><small>Tracked obligations</small></article>
+        <article class="metric-card"><span>Investable portfolio</span><strong id="portfolioMetric">—</strong><small id="holdingsCountMetric">— holdings</small></article>
+      </div>
+      <div class="dashboard-grid two-one">
+        <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">TRAJECTORY</span><h2>Net worth over time</h2></div></div><div class="chart-wrap chart-tall"><canvas id="netWorthChart"></canvas></div></article>
+        <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">MIX</span><h2>Asset allocation</h2></div></div><div class="chart-wrap"><canvas id="allocationChart"></canvas></div><div id="allocationLegend" class="compact-legend"></div></article>
+      </div>
+      <div class="dashboard-grid equal">
+        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">POSITIONS</span><h2>Largest holdings</h2></div><button class="text-button" data-view-link="research">Research a stock</button></div><div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Value</th><th>Price</th><th>Quantity</th></tr></thead><tbody id="holdingsTable"></tbody></table></div></article>
+        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">READINESS</span><h2>Retirement snapshot</h2></div><button class="text-button" data-view-link="retirement">Open plan</button></div><div class="readiness-card"><div id="readinessRing" class="progress-ring"><span id="successRateMetric">—</span></div><div><h3 id="readinessLabel">Calculating…</h3><p id="readinessCopy" class="muted">Your projection uses portfolio values and saved assumptions.</p></div></div><div class="mini-disclaimer">Hypothetical model output, not a guarantee.</div></article>
+      </div>
+    </section>
+
+    <section id="retirement" class="view">
+      <div class="dashboard-grid two-one">
+        <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">MONTE CARLO</span><h2>Portfolio range by age</h2></div><span id="retirementStatus" class="status-pill neutral">—</span></div><div class="chart-wrap chart-extra-tall"><canvas id="retirementChart"></canvas></div><p class="chart-note">Shaded outcomes are represented by 10th, 50th, and 90th percentile paths from seeded simulations.</p></article>
+        <article class="panel form-panel"><div class="panel-head"><div><span class="panel-kicker">ASSUMPTIONS</span><h2>Plan inputs</h2></div></div>
+          <form id="retirementForm" class="stack-form">
+            <div class="form-row"><label>Current age<input name="currentAge" type="number" min="18" max="90" required></label><label>Retirement age<input name="retirementAge" type="number" min="19" max="95" required></label></div>
+            <label>Plan through age<input name="planEndAge" type="number" min="50" max="120" required></label>
+            <label>Annual contribution<input name="annualContribution" type="number" min="0" step="100" required></label>
+            <label>Annual retirement spending<input name="annualRetirementSpending" type="number" min="0" step="100" required></label>
+            <div class="form-row"><label>Expected return %<input name="expectedReturnPct" type="number" min="-50" max="50" step="0.1" required></label><label>Volatility %<input name="volatilityPct" type="number" min="0" max="100" step="0.1" required></label></div>
+            <label>Inflation %<input name="inflationPct" type="number" min="-2" max="20" step="0.1" required></label>
+            <button class="button button-primary" type="submit">Update projection</button>
+          </form>
+        </article>
+      </div>
+      <article class="panel"><div class="panel-head"><div><span class="panel-kicker">MODEL LIMITS</span><h2>What Phase 1 includes</h2></div></div><div id="retirementAssumptions" class="assumption-grid"></div></article>
+    </section>
+
+    <section id="scenario" class="view">
+      <div class="dashboard-grid equal">
+        <article class="panel form-panel"><div class="panel-head"><div><span class="panel-kicker">HYPOTHETICAL TRADE</span><h2>Buy / sell scenario</h2></div></div>
+          <form id="scenarioForm" class="stack-form">
+            <div class="form-row"><label>Action<select name="action"><option value="BUY">Buy</option><option value="SELL">Sell</option></select></label><label>Ticker<input name="symbol" maxlength="10" placeholder="TSLA" required></label></div>
+            <div class="form-row"><label>Quantity<input name="quantity" type="number" min="0.000001" step="0.000001" placeholder="10"></label><label>Dollar amount<input name="amount" type="number" min="0.01" step="0.01" placeholder="Or enter amount"></label></div>
+            <div class="form-row"><label>Execution price<input name="executionPrice" type="number" min="0.01" step="0.01" placeholder="Use current price"></label><label>Target price<input name="targetPrice" type="number" min="0.01" step="0.01" required></label></div>
+            <button class="button button-primary" type="submit">Run what-if</button>
+          </form>
+          <p class="mini-disclaimer">No order is sent to a broker. Taxes, spreads, and slippage are excluded.</p>
+        </article>
+        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">RESULT</span><h2>Portfolio impact</h2></div></div><div id="scenarioEmpty" class="empty-inline">Run a scenario to compare portfolio value, cash, and concentration.</div><div id="scenarioResult" class="hidden"></div></article>
+      </div>
+      <article class="panel"><div class="panel-head"><div><span class="panel-kicker">SAVED</span><h2>Recent scenarios</h2></div></div><div id="scenarioHistory" class="scenario-history"></div></article>
+    </section>
+
+    <section id="research" class="view">
+      <div class="research-layout">
+        <article class="panel chat-panel">
+          <div class="panel-head"><div><span class="panel-kicker">NIRVANA AI</span><h2>Financial research chat</h2></div><span id="skillCount" class="status-pill neutral">Skills</span></div>
+          <div class="prompt-chips"><button data-prompt="Show me the trend of TSLA over 3 months">TSLA 3M trend</button><button data-prompt="Research NVDA: bull case, bear case, valuation and key uncertainties">Research NVDA</button><button data-prompt="Explain the concentration risk in my current portfolio">Portfolio concentration</button></div>
+          <div id="chatMessages" class="chat-messages"><div class="assistant-message message"><div class="message-label">Nirvana</div><p>Ask for a stock trend, company research, or an explanation grounded in your saved financial context.</p></div></div>
+          <form id="chatForm" class="chat-input"><textarea name="message" rows="2" maxlength="6000" placeholder="Example: Tell me the trend of Tesla over 6 months and explain the major risks" required></textarea><button class="button button-primary" type="submit">Ask</button></form>
+          <div id="disclaimerBox" class="disclaimer-box">Educational research only. Automated outputs may be incomplete or wrong.</div>
+        </article>
+        <aside class="panel research-chart-panel"><div class="panel-head"><div><span class="panel-kicker">MARKET VIEW</span><h2 id="researchChartTitle">Chart appears here</h2></div></div><div id="researchChartEmpty" class="empty-inline">Ask for a ticker trend over 3M, 6M, YTD, or 1Y.</div><div class="chart-wrap chart-tall hidden" id="researchChartWrap"><canvas id="researchChart"></canvas></div><div id="researchSources" class="source-list"></div></aside>
+      </div>
+    </section>
+
+    <section id="accounts" class="view">
+      <div class="dashboard-grid equal">
+        <article class="panel form-panel"><div class="panel-head"><div><span class="panel-kicker">MANUAL ACCOUNT</span><h2>Add an asset</h2></div></div><form id="accountForm" class="stack-form"><label>Account name<input name="name" required placeholder="Fidelity Brokerage"></label><label>Institution<input name="institution" placeholder="Optional"></label><label>Account type<select name="accountType"><option value="cash">Cash</option><option value="brokerage">Brokerage</option><option value="retirement">Retirement</option><option value="property">Property</option><option value="hsa">HSA</option><option value="529">529</option><option value="other_asset">Other asset</option></select></label><label>Current balance<input name="currentBalance" type="number" min="0" step="0.01" required></label><button class="button button-primary" type="submit">Add account</button></form></article>
+        <article class="panel form-panel"><div class="panel-head"><div><span class="panel-kicker">MANUAL LIABILITY</span><h2>Add a debt</h2></div></div><form id="liabilityForm" class="stack-form"><label>Liability name<input name="name" required placeholder="Home mortgage"></label><label>Institution<input name="institution" placeholder="Optional"></label><label>Type<select name="liabilityType"><option value="mortgage">Mortgage</option><option value="credit_card">Credit card</option><option value="student_loan">Student loan</option><option value="auto_loan">Auto loan</option><option value="personal_loan">Personal loan</option><option value="other">Other</option></select></label><div class="form-row"><label>Balance<input name="currentBalance" type="number" min="0" step="0.01" required></label><label>Rate %<input name="interestRatePct" type="number" min="0" max="100" step="0.01"></label></div><label>Minimum payment<input name="minimumPayment" type="number" min="0" step="0.01"></label><button class="button button-primary" type="submit">Add liability</button></form></article>
+      </div>
+      <div class="dashboard-grid two-one">
+        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">CONNECTED DATA</span><h2>Accounts and liabilities</h2></div><span id="aggregationBadge" class="status-pill neutral">Manual</span></div><div id="accountsList" class="account-list"></div></article>
+        <article class="panel form-panel"><div class="panel-head"><div><span class="panel-kicker">CSV BACKUP</span><h2>Import holdings</h2></div></div><p class="muted">Upload holdings without connecting a financial institution. Existing account + symbol rows are updated.</p><form id="csvForm" class="stack-form"><label class="file-drop">Choose CSV<input name="file" type="file" accept=".csv,text/csv" required></label><button class="button button-secondary" type="submit">Import CSV</button></form><a class="text-link" href="/holdings-template.csv" download>Download CSV template</a><div id="plaidMessage" class="mini-disclaimer"></div></article>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
+  <script src="/app.js" defer></script>
+</body>
+</html>
