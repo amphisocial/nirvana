@@ -1,0 +1,144 @@
+<section id="scenario" class="view">
+  <div id="whatIfLab" class="whatif-lab">
+    <div class="whatif-hero">
+      <div>
+        <span class="panel-kicker">WHAT-IF LAB</span>
+        <h2>Test major financial decisions before making them</h2>
+        <p>Ask Nirvana to pay off debt from an investment account, change future market returns, or stress a stock portfolio. Every run is calculated in memory against your current plan and is discarded when you leave or reset the page.</p>
+      </div>
+      <span class="whatif-session-badge">Session-only analysis</span>
+    </div>
+
+    <div class="whatif-tabs" role="tablist" aria-label="What-if modes">
+      <button class="whatif-tab active" type="button" data-whatif-tab="household" role="tab" aria-selected="true">Household plan</button>
+      <button class="whatif-tab" type="button" data-whatif-tab="portfolio" role="tab" aria-selected="false">Stock portfolio</button>
+    </div>
+
+    <div class="whatif-tab-panel active" data-whatif-panel="household">
+      <article class="whatif-ai-card">
+        <span class="panel-kicker">AI-ASSISTED PLAN CHANGES</span>
+        <h3>Describe the hypothetical decision</h3>
+        <p>Nirvana maps the request to your saved accounts and debts, then compares your current plan with the temporary scenario.</p>
+        <form id="householdWhatIfForm" class="whatif-ai-form">
+          <textarea id="householdWhatIfPrompt" maxlength="5000" required placeholder="Example: At age 57, use my brokerage account to pay off the mortgage, home equity loan and car loan."></textarea>
+          <button id="runHouseholdWhatIf" class="button" type="submit">Run what-if</button>
+        </form>
+        <div class="whatif-prompt-chips">
+          <button type="button" data-household-prompt="At age 57, use my stock brokerage account to pay off the mortgage.">Stocks pay mortgage at 57</button>
+          <button type="button" data-household-prompt="At age 60, use my brokerage account to pay off the home equity loan and car loan.">Pay HELOC and car at 60</button>
+          <button type="button" data-household-prompt="Assume stocks grow 20% per year for the next 2 years, 2% in years 3 through 4, and 6% thereafter.">20%, then 2%, then 6%</button>
+          <button type="button" data-household-prompt="At age 58, use my brokerage account to pay off all of my debt, and assume stocks return 6% thereafter.">Debt-free at 58</button>
+        </div>
+      </article>
+
+      <div class="whatif-toolbar">
+        <label class="whatif-filter"><input id="whatIfExclude529" type="checkbox" checked> Exclude 529-funded expenses from cash-flow chart</label>
+        <button id="resetHouseholdWhatIf" class="button button-secondary" type="button">Reset to baseline</button>
+      </div>
+
+      <div id="whatIfEmpty" class="whatif-empty">
+        <div><strong>Run a household what-if</strong>The result will show baseline and scenario income, expenses, debt, stock-account value and net worth.</div>
+      </div>
+
+      <div id="whatIfResults" class="hidden">
+        <article class="whatif-scenario-card">
+          <div class="whatif-scenario-head">
+            <div><h3 id="whatIfScenarioTitle">What-if scenario</h3><p id="whatIfScenarioSummary"></p></div>
+            <span id="whatIfPersistenceNote" class="whatif-persistence">Temporary analysis only</span>
+          </div>
+          <div id="whatIfAssumptions" class="whatif-assumptions"></div>
+          <div id="whatIfShortfall" class="whatif-shortfall"></div>
+        </article>
+
+        <div class="metric-grid whatif-metrics">
+          <article class="metric-card metric-featured"><span>Debt paid from assets</span><strong id="whatIfDebtPaid">—</strong><small>Temporary source-account withdrawal</small></article>
+          <article class="metric-card"><span>Monthly expense reduction</span><strong id="whatIfExpenseReduction">—</strong><small id="whatIfExpenseReductionNote">After modeled payoff</small></article>
+          <article class="metric-card"><span>Net-worth change at retirement</span><strong id="whatIfRetirementChange">—</strong><small>Scenario minus baseline</small></article>
+          <article class="metric-card"><span>Net-worth change at plan end</span><strong id="whatIfEndChange">—</strong><small>Scenario minus baseline</small></article>
+        </div>
+
+        <div class="whatif-chart-grid">
+          <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">CASH FLOW</span><h2>Income and expenses</h2></div></div><div class="chart-wrap whatif-chart-wrap"><canvas id="whatIfCashflowChart"></canvas></div></article>
+          <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">NET WORTH</span><h2>Baseline versus scenario</h2></div></div><div class="chart-wrap whatif-chart-wrap"><canvas id="whatIfNetWorthChart"></canvas></div></article>
+          <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">DEBT AND FUNDING</span><h2>Debt balance versus stock accounts</h2></div></div><div class="chart-wrap whatif-chart-wrap"><canvas id="whatIfDebtChart"></canvas></div></article>
+        </div>
+      </div>
+    </div>
+
+    <div class="whatif-tab-panel" data-whatif-panel="portfolio">
+      <article class="whatif-ai-card">
+        <span class="panel-kicker">PORTFOLIO WHAT-IF</span>
+        <h3>Stress the full stock account or individual symbols</h3>
+        <p>Select a brokerage account, then ask for account-level return phases or symbol-specific moves. The charts show the stock-account path and its impact on household net worth.</p>
+        <form id="portfolioWhatIfForm" class="whatif-ai-form">
+          <textarea id="portfolioWhatIfPrompt" maxlength="5000" required placeholder="Example: NVDA rises 30% next year, TSLA drops 15%, and the rest of the account grows 7% annually."></textarea>
+          <button id="runPortfolioWhatIf" class="button" type="submit">Run portfolio what-if</button>
+        </form>
+        <div class="whatif-prompt-chips">
+          <button type="button" data-portfolio-prompt="Assume the stock account grows 15% per year for the next 3 years, then 6% thereafter.">15% for 3 years</button>
+          <button type="button" data-portfolio-prompt="NVDA rises 30% next year and TSLA drops 15% next year. The rest of the stock account grows 7%.">NVDA +30%, TSLA -15%</button>
+          <button type="button" data-portfolio-prompt="Assume all stocks drop 25% next year, recover 12% in year 2, and grow 7% thereafter.">Crash and recovery</button>
+        </div>
+      </article>
+
+      <div class="whatif-portfolio-summary">
+        <article class="panel">
+          <div class="panel-head"><div><span class="panel-kicker">STOCK ACCOUNT</span><h2>Saved account and symbols</h2></div></div>
+          <div class="stack-form">
+            <label>Brokerage account<select id="portfolioWhatIfAccount"><option value="">Choose a stock account</option></select></label>
+            <label>Projection horizon<select id="portfolioWhatIfHorizon"><option value="5">5 years</option><option value="10" selected>10 years</option><option value="20">20 years</option><option value="30">30 years</option></select></label>
+            <div class="whatif-account-total"><span>Total stock-account value</span><strong id="portfolioAccountTotal">—</strong></div>
+            <button id="openAccountsForHoldings" class="button button-secondary" type="button">Break total into stock symbols</button>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head"><div><span class="panel-kicker">COMPOSITION</span><h2>Actual saved holdings</h2></div></div>
+          <div class="whatif-holdings-layout">
+            <div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Value</th><th>Weight</th></tr></thead><tbody id="portfolioHoldingRows"></tbody></table></div>
+            <div class="chart-wrap whatif-holdings-chart"><canvas id="portfolioCompositionChart"></canvas></div>
+          </div>
+        </article>
+      </div>
+
+      <div id="portfolioWhatIfEmpty" class="whatif-empty">
+        <div><strong>Run a portfolio what-if</strong>The result will compare the selected stock account and household net worth against the saved baseline.</div>
+      </div>
+
+      <div id="portfolioWhatIfResults" class="hidden">
+        <article class="whatif-scenario-card">
+          <div class="whatif-scenario-head"><div><h3>Portfolio scenario</h3><p id="portfolioWhatIfSummary"></p></div><span id="portfolioWhatIfPersistence" class="whatif-persistence">Temporary analysis only</span></div>
+          <div id="portfolioWhatIfAssumptions" class="whatif-assumptions"></div>
+        </article>
+        <div class="metric-grid whatif-metrics">
+          <article class="metric-card metric-featured"><span>Scenario ending value</span><strong id="portfolioEndingValue">—</strong><small>Selected horizon</small></article>
+          <article class="metric-card"><span>Stock-account change</span><strong id="portfolioValueChange">—</strong><small>Scenario minus baseline</small></article>
+          <article class="metric-card"><span>Household net-worth impact</span><strong id="portfolioNetWorthChange">—</strong><small>From the stock scenario</small></article>
+        </div>
+        <div class="whatif-chart-grid">
+          <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">STOCK ACCOUNT</span><h2>Baseline versus scenario value</h2></div></div><div class="chart-wrap whatif-chart-wrap"><canvas id="portfolioWhatIfChart"></canvas></div></article>
+          <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">NET-WORTH IMPACT</span><h2>Household value with stock scenario</h2></div></div><div class="chart-wrap whatif-chart-wrap"><canvas id="portfolioNetWorthImpactChart"></canvas></div></article>
+        </div>
+        <div class="whatif-toolbar"><span></span><button id="resetPortfolioWhatIf" class="button button-secondary" type="button">Reset portfolio scenario</button></div>
+      </div>
+
+      <article class="panel whatif-single-trade">
+        <div class="panel-head"><div><span class="panel-kicker">SINGLE TRADE CALCULATOR</span><h2>Existing buy / sell target-price what-if</h2></div><span class="status-pill neutral">Separate calculator</span></div>
+        <div class="dashboard-grid equal">
+          <div>
+            <form id="scenarioForm" class="stack-form">
+              <div class="form-row"><label>Action<select name="action"><option value="BUY">Buy</option><option value="SELL">Sell</option></select></label><label>Ticker<input name="symbol" maxlength="10" placeholder="TSLA" required></label></div>
+              <div class="form-row"><label>Quantity<input name="quantity" type="number" min="0.000001" step="0.000001" placeholder="10"></label><label>Dollar amount<input name="amount" type="number" min="0.01" step="0.01" placeholder="Or enter amount"></label></div>
+              <div class="form-row"><label>Execution price<input name="executionPrice" type="number" min="0.01" step="0.01" placeholder="Use current price"></label><label>Target price<input name="targetPrice" type="number" min="0.01" step="0.01" required></label></div>
+              <button class="button button-primary" type="submit">Run single-trade what-if</button>
+            </form>
+            <p class="mini-disclaimer">No order is sent to a broker. Taxes, spreads, and slippage are excluded.</p>
+          </div>
+          <div><div id="scenarioEmpty" class="empty-inline">Run a single-trade scenario to compare portfolio value, cash, and concentration.</div><div id="scenarioResult" class="hidden"></div></div>
+        </div>
+        <div class="panel-head"><div><span class="panel-kicker">RECENT CALCULATIONS</span><h2>Single-trade scenario history</h2></div></div>
+        <div id="scenarioHistory" class="scenario-history"></div>
+      </article>
+    </div>
+  </div>
+</section>
