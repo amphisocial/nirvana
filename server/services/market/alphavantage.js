@@ -1,6 +1,11 @@
 import { config } from '../../config.js';
 
 const BASE_URL = 'https://www.alphavantage.co/query';
+const MIN_REQUEST_GAP_MS = 1200;
+const RATE_LIMIT_COOLDOWN_MS = 15 * 60 * 1000;
+let requestChain = Promise.resolve();
+let lastRequestAt = 0;
+let blockedUntil = 0;
 
 function numberOrNull(value) {
   if (value === undefined || value === null || value === '' || value === 'None' || value === '-') return null;
@@ -8,17 +13,41 @@ function numberOrNull(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-async function request(params) {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function performRequest(params) {
   if (!config.market.alphaVantageApiKey) throw new Error('ALPHAVANTAGE_API_KEY is not configured');
+  if (Date.now() < blockedUntil) throw new Error('Alpha Vantage is temporarily paused after a rate-limit response');
+
+  const waitMs = Math.max(0, MIN_REQUEST_GAP_MS - (Date.now() - lastRequestAt));
+  if (waitMs) await sleep(waitMs);
+
   const url = new URL(BASE_URL);
-  Object.entries({ ...params, apikey: config.market.alphaVantageApiKey }).forEach(([key, value]) => url.searchParams.set(key, value));
-  const response = await fetch(url, { headers: { 'User-Agent': 'Nirvana/0.2' } });
+  Object.entries({ ...params, apikey: config.market.alphaVantageApiKey })
+    .forEach(([key, value]) => url.searchParams.set(key, value));
+
+  lastRequestAt = Date.now();
+  const response = await fetch(url, {
+    headers: { 'User-Agent': 'Nirvana/0.4' },
+    signal: AbortSignal.timeout(15000)
+  });
   if (!response.ok) throw new Error(`Alpha Vantage request failed with HTTP ${response.status}`);
+
   const data = await response.json();
-  if (data.Note) throw new Error(`Alpha Vantage rate limit: ${data.Note}`);
-  if (data.Information) throw new Error(data.Information);
-  if (data['Error Message']) throw new Error(data['Error Message']);
+  const providerMessage = data.Note || data.Information || data['Error Message'];
+  if (providerMessage) {
+    if (/rate limit|spreading out|premium plans|frequency|call volume/i.test(providerMessage)) {
+      blockedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+    }
+    throw new Error(providerMessage);
+  }
   return data;
+}
+
+function request(params) {
+  const operation = requestChain.then(() => performRequest(params));
+  requestChain = operation.catch(() => undefined);
+  return operation;
 }
 
 function startForRange(range) {
@@ -33,23 +62,25 @@ function startForRange(range) {
 export async function getAlphaVantageHistory(symbol, range = '3m') {
   const normalized = symbol.toUpperCase();
   const useDaily = range === '3m';
-  const functionName = useDaily ? 'TIME_SERIES_DAILY' : 'TIME_SERIES_WEEKLY_ADJUSTED';
+  const functionName = useDaily ? 'TIME_SERIES_DAILY' : 'TIME_SERIES_WEEKLY';
   const data = await request({ function: functionName, symbol: normalized, outputsize: 'compact' });
-  const seriesKey = useDaily ? 'Time Series (Daily)' : 'Weekly Adjusted Time Series';
+  const seriesKey = useDaily ? 'Time Series (Daily)' : 'Weekly Time Series';
   const series = data[seriesKey];
   if (!series) throw new Error(`No historical data returned for ${normalized}`);
+
   const start = startForRange(range);
-  const closeKey = useDaily ? '4. close' : '5. adjusted close';
   const points = Object.entries(series)
     .filter(([date]) => date >= start)
-    .map(([date, values]) => ({ date, close: Number(values[closeKey]) }))
+    .map(([date, values]) => ({ date, close: Number(values['4. close']) }))
     .filter((point) => Number.isFinite(point.close))
     .sort((a, b) => a.date.localeCompare(b.date));
+
+  if (!points.length) throw new Error(`No usable historical points returned for ${normalized}`);
   return {
     symbol: normalized,
     range,
     points,
-    source: 'Alpha Vantage price history',
+    source: `Alpha Vantage ${useDaily ? 'daily' : 'weekly'} price history`,
     delayed: true,
     asOf: points.at(-1)?.date || null
   };
@@ -63,13 +94,6 @@ export async function getAlphaVantageQuote(symbol) {
   return {
     symbol: normalized,
     price: numberOrNull(quote['05. price']),
-    open: numberOrNull(quote['02. open']),
-    high: numberOrNull(quote['03. high']),
-    low: numberOrNull(quote['04. low']),
-    volume: numberOrNull(quote['06. volume']),
-    previousClose: numberOrNull(quote['08. previous close']),
-    change: numberOrNull(quote['09. change']),
-    changePct: numberOrNull(String(quote['10. change percent'] || '0').replace('%', '')),
     asOf: quote['07. latest trading day'] || null,
     source: 'Alpha Vantage Global Quote',
     delayed: true
@@ -78,10 +102,7 @@ export async function getAlphaVantageQuote(symbol) {
 
 export async function getAlphaVantageResearch(symbol) {
   const normalized = symbol.toUpperCase();
-  const [overview, quote] = await Promise.all([
-    request({ function: 'OVERVIEW', symbol: normalized }),
-    getAlphaVantageQuote(normalized)
-  ]);
+  const overview = await request({ function: 'OVERVIEW', symbol: normalized });
   if (!overview?.Symbol && !overview?.Name) throw new Error(`No company overview returned for ${normalized}`);
   return {
     symbol: normalized,
@@ -130,40 +151,12 @@ export async function getAlphaVantageResearch(symbol) {
     fiftyTwoWeekLow: numberOrNull(overview['52WeekLow']),
     fiftyDayMovingAverage: numberOrNull(overview['50DayMovingAverage']),
     twoHundredDayMovingAverage: numberOrNull(overview['200DayMovingAverage']),
-    quote,
-    source: 'Alpha Vantage Company Overview and Global Quote'
+    quote: null,
+    source: 'Alpha Vantage Company Overview'
   };
 }
 
 export async function getAlphaVantageNews(symbol) {
   const normalized = symbol.toUpperCase();
-  const data = await request({
-    function: 'NEWS_SENTIMENT',
-    tickers: normalized,
-    sort: 'LATEST',
-    limit: String(config.market.newsLimit)
-  });
-  const articles = (Array.isArray(data.feed) ? data.feed : []).slice(0, config.market.newsLimit).map((item, index) => {
-    const tickerSentiment = Array.isArray(item.ticker_sentiment)
-      ? item.ticker_sentiment.find((entry) => String(entry.ticker).toUpperCase() === normalized)
-      : null;
-    return {
-      id: `N${index + 1}`,
-      title: item.title || 'Untitled article',
-      summary: item.summary || '',
-      url: item.url || null,
-      source: item.source || item.source_domain || 'Unknown publisher',
-      sourceDomain: item.source_domain || null,
-      publishedAt: item.time_published || null,
-      overallSentimentLabel: item.overall_sentiment_label || null,
-      tickerSentimentLabel: tickerSentiment?.ticker_sentiment_label || null,
-      relevanceScore: numberOrNull(tickerSentiment?.relevance_score)
-    };
-  });
-  return {
-    symbol: normalized,
-    articles,
-    source: 'Alpha Vantage News & Sentiment',
-    asOf: articles[0]?.publishedAt || null
-  };
+  return { symbol: normalized, articles: [], source: 'OpenAI web search', asOf: null };
 }

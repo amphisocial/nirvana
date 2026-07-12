@@ -9,6 +9,15 @@ export async function getCached(key) {
   return result.rows[0]?.payload || null;
 }
 
+export async function getCachedStale(key) {
+  const result = await pool.query(
+    'SELECT payload, expires_at FROM market_cache WHERE cache_key = $1',
+    [key]
+  );
+  if (!result.rows[0]) return null;
+  return { payload: result.rows[0].payload, expiredAt: result.rows[0].expires_at };
+}
+
 export async function setCached(key, payload, ttlMinutes = config.market.cacheMinutes) {
   await pool.query(
     `INSERT INTO market_cache (cache_key, payload, expires_at)

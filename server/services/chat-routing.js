@@ -5,7 +5,12 @@ const RANGE_PATTERNS = [
   { range: '1y', regex: /\b(1\s*(y|yr|year)|one\s+year|12\s*months?)\b/i }
 ];
 
-const COMMON_WORDS = new Set(['TELL', 'ABOUT', 'TREND', 'STOCK', 'PRICE', 'SHOW', 'OVER', 'LAST', 'MONTH', 'MONTHS', 'YEAR', 'BUY', 'SELL', 'THE', 'TO', 'FOR', 'AND', 'OR', 'WHAT', 'VIEW']);
+const COMMON_WORDS = new Set([
+  'TELL', 'ABOUT', 'TREND', 'STOCK', 'PRICE', 'SHOW', 'OVER', 'LAST',
+  'MONTH', 'MONTHS', 'YEAR', 'BUY', 'SELL', 'THE', 'TO', 'FOR', 'AND',
+  'OR', 'WHAT', 'VIEW', 'YTD', 'ETF', 'AI', 'CEO', 'CFO', 'EPS', 'PE',
+  'TTM', 'IV', 'EV', 'FCF', 'DCF', 'RSI', 'MACD'
+]);
 
 const COMPANY_ALIASES = new Map([
   ['tesla', 'TSLA'],

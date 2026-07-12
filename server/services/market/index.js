@@ -1,5 +1,5 @@
 import { config } from '../../config.js';
-import { getCached, setCached } from './cache.js';
+import { getCached, getCachedStale, setCached } from './cache.js';
 import { getMockHistory, getMockQuote, getMockResearch, getMockNews } from './mock.js';
 import {
   getAlphaVantageHistory,
@@ -10,12 +10,7 @@ import {
 import { calculateMarketAnalytics, calculateQuantDiagnostics, sliceHistoryForRange } from './analytics.js';
 
 const providers = {
-  mock: {
-    history: getMockHistory,
-    quote: getMockQuote,
-    research: getMockResearch,
-    news: getMockNews
-  },
+  mock: { history: getMockHistory, quote: getMockQuote, research: getMockResearch, news: getMockNews },
   alphavantage: {
     history: getAlphaVantageHistory,
     quote: getAlphaVantageQuote,
@@ -35,76 +30,112 @@ async function cachedCall(key, callback, ttl) {
     const cached = await getCached(key);
     if (cached) return cached;
   } catch (error) {
-    console.warn('Market cache read failed; continuing without cache:', error.message);
+    console.warn('Market cache read failed:', error.message);
   }
-  const value = await callback();
+
   try {
-    await setCached(key, value, ttl);
-  } catch (error) {
-    console.warn('Market cache write failed:', error.message);
+    const value = await callback();
+    try { await setCached(key, value, ttl); }
+    catch (error) { console.warn('Market cache write failed:', error.message); }
+    return value;
+  } catch (liveError) {
+    try {
+      const stale = await getCachedStale(key);
+      if (stale?.payload) {
+        console.warn(`Using stale cache for ${key}:`, liveError.message);
+        return { ...stale.payload, stale: true, staleReason: liveError.message };
+      }
+    } catch (cacheError) {
+      console.warn('Stale cache lookup failed:', cacheError.message);
+    }
+    throw liveError;
   }
-  return value;
 }
 
 export function getHistory(symbol, range = '3m') {
   const normalized = symbol.toUpperCase();
-  return cachedCall(`history:${config.market.provider}:${normalized}:${range}`, () => provider().history(normalized, range), config.market.cacheMinutes);
+  return cachedCall(
+    `history:${config.market.provider}:${normalized}:${range}`,
+    () => provider().history(normalized, range),
+    config.market.cacheMinutes
+  );
 }
 
 export function getQuote(symbol) {
   const normalized = symbol.toUpperCase();
-  return cachedCall(`quote:${config.market.provider}:${normalized}`, () => provider().quote(normalized), Math.min(config.market.cacheMinutes, 15));
+  return cachedCall(
+    `quote:${config.market.provider}:${normalized}`,
+    () => provider().quote(normalized),
+    Math.min(config.market.cacheMinutes, 15)
+  );
 }
 
 export function getResearch(symbol) {
   const normalized = symbol.toUpperCase();
-  return cachedCall(`research:${config.market.provider}:${normalized}`, () => provider().research(normalized), config.market.researchCacheMinutes);
+  return cachedCall(
+    `research:${config.market.provider}:${normalized}`,
+    () => provider().research(normalized),
+    config.market.researchCacheMinutes
+  );
 }
 
 export function getNews(symbol) {
   const normalized = symbol.toUpperCase();
-  return cachedCall(`news:${config.market.provider}:${normalized}`, () => provider().news(normalized), config.market.newsCacheMinutes);
+  return cachedCall(
+    `news:${config.market.provider}:${normalized}`,
+    () => provider().news(normalized),
+    config.market.newsCacheMinutes
+  );
 }
 
-function settledValue(result, label, gaps) {
-  if (result.status === 'fulfilled') return result.value;
-  gaps.push(`${label}: ${result.reason?.message || 'unavailable'}`);
-  return null;
+async function safely(label, callback, gaps) {
+  try { return await callback(); }
+  catch (error) {
+    gaps.push(`${label}: ${error.message}`);
+    return null;
+  }
 }
 
 export async function getResearchBundle(symbol, chartRange = '1y') {
   const normalized = symbol.toUpperCase();
-  const [researchResult, historyResult, newsResult] = await Promise.allSettled([
-    getResearch(normalized),
-    getHistory(normalized, '1y'),
-    getNews(normalized)
-  ]);
   const dataGaps = [];
-  const research = settledValue(researchResult, 'Company fundamentals and quote', dataGaps);
-  const history = settledValue(historyResult, 'One-year price history', dataGaps);
-  const news = settledValue(newsResult, 'Recent company news', dataGaps);
 
-  if (!research && !history) {
-    throw new Error(`No live research data could be retrieved for ${normalized}. ${dataGaps.join(' ')}`);
+  const history = await safely('One-year price history', () => getHistory(normalized, '1y'), dataGaps);
+  const research = await safely('Company fundamentals', () => getResearch(normalized), dataGaps);
+
+  if (research && history?.points?.length) {
+    const latest = history.points.at(-1);
+    research.quote = {
+      symbol: normalized,
+      price: latest.close,
+      asOf: latest.date,
+      source: history.source,
+      delayed: true
+    };
   }
 
   const analytics = history ? calculateMarketAnalytics(history, research || {}) : null;
   const chartHistory = history ? sliceHistoryForRange(history, chartRange) : null;
+
   let benchmark = null;
   let quant = null;
   if (history && normalized !== 'SPY') {
-    try {
-      const benchmarkHistory = await getHistory('SPY', '1y');
+    const benchmarkHistory = await safely(
+      'Benchmark-relative quant analysis',
+      () => getHistory('SPY', '1y'),
+      dataGaps
+    );
+    if (benchmarkHistory) {
       const benchmarkAnalytics = calculateMarketAnalytics(benchmarkHistory, {});
       benchmark = { symbol: 'SPY', history: benchmarkHistory, analytics: benchmarkAnalytics };
       quant = calculateQuantDiagnostics(history, analytics, benchmarkHistory, benchmarkAnalytics, 'SPY');
-    } catch (error) {
-      dataGaps.push(`Benchmark-relative quant analysis: ${error.message}`);
+    } else {
       quant = calculateQuantDiagnostics(history, analytics, null, null, 'SPY');
     }
   } else if (history) {
     quant = calculateQuantDiagnostics(history, analytics, history, analytics, 'SPY');
   }
+
   return {
     symbol: normalized,
     provider: config.market.provider,
@@ -116,7 +147,9 @@ export async function getResearchBundle(symbol, chartRange = '1y') {
     benchmark,
     history,
     chartHistory,
-    news,
-    dataGaps
+    news: null,
+    dataGaps,
+    liveDataAvailable: Boolean(research || history),
+    webResearchRequired: !research || !history
   };
 }

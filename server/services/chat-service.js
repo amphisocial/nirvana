@@ -66,10 +66,20 @@ export async function answerChat({ message, householdContext }) {
   const sourceKeys = new Set();
 
   if (ticker) {
-    const bundle = await getResearchBundle(ticker, chartRange);
-    context.marketResearch = bundle;
-    chart = chartFromHistory(ticker, chartRange, bundle.chartHistory);
-    for (const source of sourcesFromBundle(bundle)) addSource(sources, sourceKeys, source);
+    try {
+      const bundle = await getResearchBundle(ticker, chartRange);
+      context.marketResearch = bundle;
+      chart = chartFromHistory(ticker, chartRange, bundle.chartHistory);
+      for (const source of sourcesFromBundle(bundle)) addSource(sources, sourceKeys, source);
+    } catch (error) {
+      console.error(`Market research failed for ${ticker}:`, error);
+      context.marketResearch = {
+        symbol: ticker,
+        liveDataAvailable: false,
+        webResearchRequired: true,
+        dataGaps: [error.message]
+      };
+    }
   }
 
   const selectedSkills = selectSkillNames(message);
@@ -78,12 +88,23 @@ export async function answerChat({ message, householdContext }) {
 - When marketResearch.quant is present, incorporate its multi-horizon momentum, benchmark-relative returns, trend regime, volatility, drawdown, correlation and estimated beta. State when the quant signal confirms or conflicts with the fundamental thesis.\n- When marketResearch is present, answer the ticker question directly. Never start with “I can help,” a generic checklist, or a claim that current data is unavailable unless the packet itself records a failed source.\n- Distinguish company-specific performance from commodity, interest-rate, regulatory and sector-cycle exposure.\n- Use exact figures from the packet and identify their as-of dates. Do not invent figures.\n- Refer to supplied evidence with source IDs such as [M1], [M2], [N1]. Web-researched facts must be traceable to the web sources returned by the provider.\n- Treat analyst targets as third-party estimates, never as intrinsic value or guaranteed outcomes.
 - Do not pretend that a single-stock trend diagnostic is a cross-sectional momentum backtest. Do not claim options mispricing without an options chain, pairs arbitrage without cointegration evidence, earnings-volatility edge without event/IV history, or order-book insight without Level II data.\n- Analyze available evidence before discussing missing data. Missing fields should not consume the answer unless they materially block a conclusion.\n- Use household.portfolioSummary and account-level holdings. Never compare aggregate holdings only with one brokerage account.\n- If the market provider is mock, explicitly state that the data is synthetic and do not form a real investment conclusion.\n- End with a research posture and the two or three facts that would change it.\n- Include a brief educational-use disclaimer, but do not bury the analysis beneath disclaimers.`;
 
-  const aiResult = await generateAiResponse({
-    systemPrompt,
-    userMessage: message,
-    context,
-    enableWebSearch: Boolean(ticker)
-  });
+  let aiResult;
+  try {
+    aiResult = await generateAiResponse({
+      systemPrompt,
+      userMessage: message,
+      context,
+      enableWebSearch: Boolean(ticker)
+    });
+  } catch (error) {
+    console.error('AI response generation failed:', error);
+    aiResult = {
+      text: ticker
+        ? `I could not complete the narrative research for ${ticker} because the AI provider failed. The available chart and sources are still shown. Please retry in a moment.`
+        : 'I could not complete the response because the AI provider failed. Please retry in a moment.',
+      sources: []
+    };
+  }
 
   for (const source of aiResult.sources || []) {
     addSource(sources, sourceKeys, { ...source, id: source.id || `W${sources.length + 1}` });

@@ -29,11 +29,23 @@ function extractWebSources(response) {
   return sources;
 }
 
-export async function generateOpenAIResponse({ systemPrompt, userMessage, context, enableWebSearch = false }) {
-  if (!config.ai.openaiApiKey) throw new Error('OPENAI_API_KEY is not configured');
-  client ||= new OpenAI({ apiKey: config.ai.openaiApiKey });
-  const useWebSearch = Boolean(enableWebSearch && config.ai.webSearchEnabled);
-  const response = await client.responses.create({
+function extractText(response) {
+  if (typeof response.output_text === 'string' && response.output_text.trim()) {
+    return response.output_text.trim();
+  }
+  const parts = [];
+  for (const item of response.output || []) {
+    if (item.type !== 'message') continue;
+    for (const content of item.content || []) {
+      if (typeof content.text === 'string') parts.push(content.text);
+      else if (typeof content.output_text === 'string') parts.push(content.output_text);
+    }
+  }
+  return parts.join('\n').trim();
+}
+
+async function createResponse({ systemPrompt, userMessage, context, useWebSearch }) {
+  return client.responses.create({
     model: config.ai.model,
     max_output_tokens: config.ai.maxOutputTokens,
     instructions: systemPrompt,
@@ -43,8 +55,23 @@ export async function generateOpenAIResponse({ systemPrompt, userMessage, contex
       tool_choice: 'auto'
     } : {})
   });
-  return {
-    text: response.output_text || 'The AI provider returned no text.',
-    sources: useWebSearch ? extractWebSources(response) : []
-  };
+}
+
+export async function generateOpenAIResponse({ systemPrompt, userMessage, context, enableWebSearch = false }) {
+  if (!config.ai.openaiApiKey) throw new Error('OPENAI_API_KEY is not configured');
+  client ||= new OpenAI({ apiKey: config.ai.openaiApiKey });
+
+  const useWebSearch = Boolean(enableWebSearch && config.ai.webSearchEnabled);
+  let response = await createResponse({ systemPrompt, userMessage, context, useWebSearch });
+  let text = extractText(response);
+  const sources = useWebSearch ? extractWebSources(response) : [];
+
+  if (!text && useWebSearch) {
+    console.warn('OpenAI web-search response contained no text; retrying without tools');
+    response = await createResponse({ systemPrompt, userMessage, context, useWebSearch: false });
+    text = extractText(response);
+  }
+
+  if (!text) throw new Error(`OpenAI returned no answer text (status: ${response.status || 'unknown'})`);
+  return { text, sources };
 }
