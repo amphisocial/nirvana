@@ -51,7 +51,10 @@ export function isTickerQuestion(message) {
 export function selectSkillNames(message) {
   const names = ['personal-finance-coach'];
   if (/(retire|retirement|monte carlo|success rate|social security|pension)/i.test(message)) names.push('retirement-planner');
-  if (isTrendRequest(message) || isResearchRequest(message) || isTickerQuestion(message)) names.push('stock-market-analyst');
+  if (isTrendRequest(message) || isResearchRequest(message) || isTickerQuestion(message)) {
+    names.push('stock-market-analyst');
+    names.push('quant-equity-research');
+  }
   if (/(what[- ]?if|scenario|target price|allocation|concentration|buy|sell)/i.test(message)) names.push('portfolio-scenario-analyst');
   return [...new Set(names)];
 }

@@ -7,7 +7,7 @@ import {
   getAlphaVantageResearch,
   getAlphaVantageNews
 } from './alphavantage.js';
-import { calculateMarketAnalytics, sliceHistoryForRange } from './analytics.js';
+import { calculateMarketAnalytics, calculateQuantDiagnostics, sliceHistoryForRange } from './analytics.js';
 
 const providers = {
   mock: {
@@ -90,6 +90,21 @@ export async function getResearchBundle(symbol, chartRange = '1y') {
 
   const analytics = history ? calculateMarketAnalytics(history, research || {}) : null;
   const chartHistory = history ? sliceHistoryForRange(history, chartRange) : null;
+  let benchmark = null;
+  let quant = null;
+  if (history && normalized !== 'SPY') {
+    try {
+      const benchmarkHistory = await getHistory('SPY', '1y');
+      const benchmarkAnalytics = calculateMarketAnalytics(benchmarkHistory, {});
+      benchmark = { symbol: 'SPY', history: benchmarkHistory, analytics: benchmarkAnalytics };
+      quant = calculateQuantDiagnostics(history, analytics, benchmarkHistory, benchmarkAnalytics, 'SPY');
+    } catch (error) {
+      dataGaps.push(`Benchmark-relative quant analysis: ${error.message}`);
+      quant = calculateQuantDiagnostics(history, analytics, null, null, 'SPY');
+    }
+  } else if (history) {
+    quant = calculateQuantDiagnostics(history, analytics, history, analytics, 'SPY');
+  }
   return {
     symbol: normalized,
     provider: config.market.provider,
@@ -97,6 +112,8 @@ export async function getResearchBundle(symbol, chartRange = '1y') {
     chartRange,
     research,
     analytics,
+    quant,
+    benchmark,
     history,
     chartHistory,
     news,

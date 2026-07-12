@@ -82,9 +82,9 @@ async function seed() {
     for (const [date, assets, liabilities] of snapshots) {
       await client.query(`
         INSERT INTO net_worth_snapshots (household_id, snapshot_date, assets, liabilities, net_worth)
-        VALUES ($1, $2, $3, $4, $3 - $4)
+        VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT (household_id, snapshot_date) DO NOTHING
-      `, [DEMO_HOUSEHOLD_ID, date, assets, liabilities]);
+      `, [DEMO_HOUSEHOLD_ID, date, assets, liabilities, assets - liabilities]);
     }
 
     await client.query('COMMIT');

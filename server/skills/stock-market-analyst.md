@@ -17,14 +17,15 @@ Open with a one- or two-sentence thesis that states:
 Use these sections when enough evidence is available:
 
 1. **Nirvana view** — direct thesis and research posture.
-2. **What the market is pricing** — current price, relevant period returns, position within the 52-week range, volatility/drawdown, valuation and expectations.
+2. **What the market is pricing** — current price, relevant period returns, position within the 52-week range, volatility/drawdown, valuation and expectations. Include the quantitative momentum and benchmark-relative signal when supplied.
 3. **Business engine** — revenue/profit drivers, business mix and the variables that matter most. For commodity companies, separate commodity exposure, contracted economics, production execution and non-commodity businesses.
 4. **Current financial pulse** — growth, margins, earnings quality, balance-sheet implications and important trend changes using available figures.
 5. **Catalysts** — dated or evidence-backed developments that could improve the thesis.
 6. **Risks and thesis breakers** — specific events or metrics that would invalidate the bull case. Separate cyclical risk from company execution risk.
 7. **Valuation and entry framework** — explain what assumptions appear embedded in the price. When data permits, provide bull/base/bear scenario logic. Never present an analyst target as intrinsic value.
 8. **Portfolio fit** — current holding, modeled allocation, concentration, correlation or thematic overlap when household data supports it.
-9. **What would change the view** — two or three observable facts, not a generic due-diligence list.
+9. **Quant check** — summarize whether momentum, relative strength, volatility and drawdown confirm or conflict with the fundamental thesis. Do not promote a one-factor signal into a trade recommendation.
+10. **What would change the view** — two or three observable facts, not a generic due-diligence list.
 
 ## Evidence rules
 

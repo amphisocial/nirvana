@@ -157,3 +157,97 @@ export function calculateMarketAnalytics(history, research = {}) {
     historyEnd: latest.date
   };
 }
+
+function dailyLogReturns(points) {
+  const returns = [];
+  for (let index = 1; index < points.length; index += 1) {
+    const prior = finiteNumber(points[index - 1].close);
+    const current = finiteNumber(points[index].close);
+    if (prior && current && prior > 0 && current > 0) {
+      returns.push({ date: points[index].date, value: Math.log(current / prior) });
+    }
+  }
+  return returns;
+}
+
+function sampleCorrelation(left, right) {
+  const rightByDate = new Map(right.map((item) => [item.date, item.value]));
+  const pairs = left.filter((item) => rightByDate.has(item.date)).map((item) => [item.value, rightByDate.get(item.date)]);
+  if (pairs.length < 3) return null;
+  const meanX = pairs.reduce((sum, pair) => sum + pair[0], 0) / pairs.length;
+  const meanY = pairs.reduce((sum, pair) => sum + pair[1], 0) / pairs.length;
+  let numerator = 0;
+  let denominatorX = 0;
+  let denominatorY = 0;
+  for (const [x, y] of pairs) {
+    numerator += (x - meanX) * (y - meanY);
+    denominatorX += (x - meanX) ** 2;
+    denominatorY += (y - meanY) ** 2;
+  }
+  const denominator = Math.sqrt(denominatorX * denominatorY);
+  return denominator ? round(numerator / denominator, 3) : null;
+}
+
+function sampleBeta(assetReturns, benchmarkReturns) {
+  const benchmarkByDate = new Map(benchmarkReturns.map((item) => [item.date, item.value]));
+  const pairs = assetReturns.filter((item) => benchmarkByDate.has(item.date)).map((item) => [item.value, benchmarkByDate.get(item.date)]);
+  if (pairs.length < 3) return null;
+  const meanAsset = pairs.reduce((sum, pair) => sum + pair[0], 0) / pairs.length;
+  const meanBenchmark = pairs.reduce((sum, pair) => sum + pair[1], 0) / pairs.length;
+  let covariance = 0;
+  let benchmarkVariance = 0;
+  for (const [asset, benchmark] of pairs) {
+    covariance += (asset - meanAsset) * (benchmark - meanBenchmark);
+    benchmarkVariance += (benchmark - meanBenchmark) ** 2;
+  }
+  return benchmarkVariance ? round(covariance / benchmarkVariance, 2) : null;
+}
+
+function classifyMomentum(analytics, relative) {
+  if (!analytics) return 'unavailable';
+  const r = analytics.returnsPct || {};
+  const positives = [r.oneMonth, r.threeMonth, r.sixMonth, r.oneYear].filter(Number.isFinite).filter((value) => value > 0).length;
+  const aboveShort = Number.isFinite(analytics.priceVs13PeriodAveragePct) && analytics.priceVs13PeriodAveragePct > 0;
+  const aboveLong = Number.isFinite(analytics.priceVs26PeriodAveragePct) && analytics.priceVs26PeriodAveragePct > 0;
+  const relativePositive = Number.isFinite(relative?.sixMonthPct) ? relative.sixMonthPct > 0 : null;
+  if (positives >= 3 && aboveShort && aboveLong && relativePositive !== false) return 'strengthening';
+  if (positives <= 1 && !aboveShort && !aboveLong && relativePositive !== true) return 'weakening';
+  return 'mixed';
+}
+
+export function calculateQuantDiagnostics(assetHistory, assetAnalytics, benchmarkHistory, benchmarkAnalytics, benchmarkSymbol = 'SPY') {
+  if (!assetAnalytics) return null;
+  const assetReturns = assetAnalytics.returnsPct || {};
+  const benchmarkReturns = benchmarkAnalytics?.returnsPct || {};
+  const relative = {
+    oneMonthPct: Number.isFinite(assetReturns.oneMonth) && Number.isFinite(benchmarkReturns.oneMonth) ? round(assetReturns.oneMonth - benchmarkReturns.oneMonth) : null,
+    threeMonthPct: Number.isFinite(assetReturns.threeMonth) && Number.isFinite(benchmarkReturns.threeMonth) ? round(assetReturns.threeMonth - benchmarkReturns.threeMonth) : null,
+    sixMonthPct: Number.isFinite(assetReturns.sixMonth) && Number.isFinite(benchmarkReturns.sixMonth) ? round(assetReturns.sixMonth - benchmarkReturns.sixMonth) : null,
+    ytdPct: Number.isFinite(assetReturns.ytd) && Number.isFinite(benchmarkReturns.ytd) ? round(assetReturns.ytd - benchmarkReturns.ytd) : null,
+    oneYearPct: Number.isFinite(assetReturns.oneYear) && Number.isFinite(benchmarkReturns.oneYear) ? round(assetReturns.oneYear - benchmarkReturns.oneYear) : null
+  };
+  const assetPoints = Array.isArray(assetHistory?.points) ? assetHistory.points : [];
+  const benchmarkPoints = Array.isArray(benchmarkHistory?.points) ? benchmarkHistory.points : [];
+  const assetLogReturns = dailyLogReturns(assetPoints);
+  const benchmarkLogReturns = dailyLogReturns(benchmarkPoints);
+  const trendRegime = assetAnalytics.priceVs13PeriodAveragePct > 0 && assetAnalytics.priceVs26PeriodAveragePct > 0
+    ? 'above both trend averages'
+    : assetAnalytics.priceVs13PeriodAveragePct < 0 && assetAnalytics.priceVs26PeriodAveragePct < 0
+      ? 'below both trend averages'
+      : 'between trend averages';
+  const result = {
+    benchmark: benchmarkSymbol,
+    relativeReturnsPct: relative,
+    correlationToBenchmark: sampleCorrelation(assetLogReturns, benchmarkLogReturns),
+    estimatedBetaToBenchmark: sampleBeta(assetLogReturns, benchmarkLogReturns),
+    trendRegime,
+    momentumState: null,
+    methodology: 'Multi-horizon absolute and benchmark-relative momentum using available one-year closing-price history; this is a diagnostic, not a cross-sectional backtest.',
+    limitations: [
+      'Uses closing-price history and does not include transaction costs, taxes, intraday execution or short-borrow constraints.',
+      'One-year history is insufficient to establish durability across market regimes.'
+    ]
+  };
+  result.momentumState = classifyMomentum(assetAnalytics, relative);
+  return result;
+}

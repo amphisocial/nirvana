@@ -10,7 +10,8 @@ Nirvana is a personal finance and retirement-planning command center inspired by
 - Net worth, asset allocation, concentration, and holdings dashboards
 - Retirement projection with deterministic and Monte Carlo views
 - Stock trend charts for 3M, 6M, YTD, and 1Y
-- AI research chat with server-side Markdown skills and intent-based skill-agent routing
+- Evidence-driven Research AI that treats any ticker mention as a research request, builds a one-year data packet, calculates trend/risk metrics, retrieves recent news, and produces a default chart
+- Server-side Markdown skills and intent-based skill-agent routing
 - Portfolio buy/sell what-if scenarios without trade execution
 - Stripe-ready subscription hooks
 - Plaid-ready schema and feature flags, disabled by default
@@ -54,7 +55,9 @@ Plaid is not required to launch. Phase 1 uses manual entry and CSV import. Phase
 
 ## Market data
 
-`MARKET_DATA_PROVIDER=mock` makes local development deterministic. Set `MARKET_DATA_PROVIDER=alphavantage` and add `ALPHAVANTAGE_API_KEY` for live historical data. The provider uses daily history for 3M and weekly-adjusted history for longer windows so 6M/YTD charts do not depend on a premium full-daily-history response.
+`MARKET_DATA_PROVIDER=mock` makes local development deterministic and must not be used for real research. Set `MARKET_DATA_PROVIDER=alphavantage` and add `ALPHAVANTAGE_API_KEY` for live quotes, company overview/fundamentals, one-year history, calculated returns/volatility/drawdown, and recent news. Any ticker mention now launches this evidence packet and shows a default one-year chart; explicit 3M, 6M, or YTD requests crop the chart accordingly.
+
+When `AI_PROVIDER=openai` and `AI_WEB_SEARCH_ENABLED=true`, the Responses API web-search tool supplements the structured market packet with current filings, investor-relations material, and reputable reporting. Alpha Vantage news remains available to all configured AI providers.
 
 ## AI skills
 
