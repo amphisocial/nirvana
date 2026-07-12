@@ -9,18 +9,125 @@ const chatSchema = z.object({
   threadId: z.string().uuid().optional()
 });
 
+function sum(rows, key) {
+  return rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
+}
+
+function buildHouseholdContext(accounts, liabilities, holdings, plan) {
+  const accountRows = accounts.map((row) => ({ ...row, current_balance: Number(row.current_balance) || 0 }));
+  const liabilityRows = liabilities.map((row) => ({
+    ...row,
+    current_balance: Number(row.current_balance) || 0,
+    interest_rate: row.interest_rate == null ? null : Number(row.interest_rate)
+  }));
+  const holdingRows = holdings.map((row) => ({
+    ...row,
+    quantity: Number(row.quantity) || 0,
+    current_price: row.current_price == null ? null : Number(row.current_price),
+    cost_basis_per_share: row.cost_basis_per_share == null ? null : Number(row.cost_basis_per_share),
+    value: Number(row.value) || 0,
+    cost_basis: row.cost_basis == null ? null : Number(row.cost_basis),
+    unrealized_gain: row.unrealized_gain == null ? null : Number(row.unrealized_gain)
+  }));
+
+  const symbolMap = new Map();
+  for (const holding of holdingRows) {
+    const existing = symbolMap.get(holding.symbol) || {
+      symbol: holding.symbol,
+      quantity: 0,
+      value: 0,
+      cost_basis: 0,
+      accounts: []
+    };
+    existing.quantity += holding.quantity;
+    existing.value += holding.value;
+    if (holding.cost_basis !== null) existing.cost_basis += holding.cost_basis;
+    existing.accounts.push({
+      account_id: holding.account_id,
+      account_name: holding.account_name,
+      account_type: holding.account_type,
+      quantity: holding.quantity,
+      value: holding.value
+    });
+    symbolMap.set(holding.symbol, existing);
+  }
+
+  const investableTypes = new Set(['cash', 'brokerage', 'retirement', 'hsa', '529']);
+  const totalAssets = sum(accountRows, 'current_balance');
+  const totalLiabilities = sum(liabilityRows, 'current_balance');
+  const investableAccountBalances = accountRows
+    .filter((row) => investableTypes.has(row.account_type))
+    .reduce((total, row) => total + row.current_balance, 0);
+  const modeledHoldingsValue = sum(holdingRows, 'value');
+  const cashAccountBalances = accountRows
+    .filter((row) => row.account_type === 'cash')
+    .reduce((total, row) => total + row.current_balance, 0);
+  const investmentAccountsOnly = accountRows
+    .filter((row) => ['brokerage', 'retirement', 'hsa', '529'].includes(row.account_type))
+    .reduce((total, row) => total + row.current_balance, 0);
+  const unmodeledInvestmentAccountValue = investmentAccountsOnly - modeledHoldingsValue;
+
+  const dataQualityNotes = [];
+  if (Math.abs(unmodeledInvestmentAccountValue) > Math.max(500, investmentAccountsOnly * 0.02)) {
+    dataQualityNotes.push(
+      `Investment account balances exceed modeled holdings by ${unmodeledInvestmentAccountValue.toFixed(2)}. This may represent account cash, unimported positions, or different valuation timestamps; do not assign the difference to a specific account without evidence.`
+    );
+  }
+
+  return {
+    accounts: accountRows,
+    liabilities: liabilityRows,
+    holdingsByAccount: holdingRows,
+    holdingsBySymbol: [...symbolMap.values()].sort((a, b) => b.value - a.value),
+    portfolioSummary: {
+      totalAssets,
+      totalLiabilities,
+      netWorth: totalAssets - totalLiabilities,
+      investableAccountBalances,
+      investmentAccountsOnly,
+      cashAccountBalances,
+      modeledHoldingsValue,
+      unmodeledInvestmentAccountValue
+    },
+    dataQualityNotes,
+    retirementPlan: plan || null
+  };
+}
+
 async function getHouseholdContext(householdId) {
   const [accounts, liabilities, holdings, plan] = await Promise.all([
-    pool.query('SELECT name, account_type, current_balance::float8 AS current_balance FROM accounts WHERE household_id = $1', [householdId]),
-    pool.query('SELECT name, liability_type, current_balance::float8 AS current_balance, interest_rate::float8 AS interest_rate FROM liabilities WHERE household_id = $1', [householdId]),
-    pool.query(`
-      SELECT h.symbol, SUM(h.quantity)::float8 AS quantity,
-             SUM(h.quantity * COALESCE(h.current_price, 0))::float8 AS value
-      FROM holdings h JOIN accounts a ON a.id = h.account_id
-      WHERE a.household_id = $1 GROUP BY h.symbol ORDER BY value DESC`, [householdId]),
+    pool.query(
+      `SELECT id, name, institution, account_type, current_balance::float8 AS current_balance, last_verified_at
+       FROM accounts WHERE household_id = $1 ORDER BY current_balance DESC`,
+      [householdId]
+    ),
+    pool.query(
+      `SELECT id, name, institution, liability_type, current_balance::float8 AS current_balance,
+              interest_rate::float8 AS interest_rate, last_verified_at
+       FROM liabilities WHERE household_id = $1 ORDER BY current_balance DESC`,
+      [householdId]
+    ),
+    pool.query(
+      `SELECT h.account_id, a.name AS account_name, a.account_type, a.institution,
+              h.symbol, h.name, h.asset_class,
+              h.quantity::float8 AS quantity,
+              h.current_price::float8 AS current_price,
+              h.cost_basis_per_share::float8 AS cost_basis_per_share,
+              (h.quantity * COALESCE(h.current_price, 0))::float8 AS value,
+              CASE WHEN h.cost_basis_per_share IS NULL THEN NULL
+                   ELSE (h.quantity * h.cost_basis_per_share)::float8 END AS cost_basis,
+              CASE WHEN h.cost_basis_per_share IS NULL OR h.current_price IS NULL THEN NULL
+                   ELSE (h.quantity * (h.current_price - h.cost_basis_per_share))::float8 END AS unrealized_gain,
+              h.price_as_of
+       FROM holdings h
+       JOIN accounts a ON a.id = h.account_id
+       WHERE a.household_id = $1
+       ORDER BY value DESC`,
+      [householdId]
+    ),
     pool.query('SELECT * FROM retirement_plans WHERE household_id = $1', [householdId])
   ]);
-  return { accounts: accounts.rows, liabilities: liabilities.rows, holdings: holdings.rows, retirementPlan: plan.rows[0] || null };
+  return buildHouseholdContext(accounts.rows, liabilities.rows, holdings.rows, plan.rows[0] || null);
 }
 
 chatRouter.post('/', async (req, res, next) => {

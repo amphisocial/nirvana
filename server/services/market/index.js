@@ -1,18 +1,26 @@
 import { config } from '../../config.js';
 import { getCached, setCached } from './cache.js';
-import { getMockHistory, getMockQuote, getMockResearch } from './mock.js';
-import { getAlphaVantageHistory, getAlphaVantageQuote, getAlphaVantageResearch } from './alphavantage.js';
+import { getMockHistory, getMockQuote, getMockResearch, getMockNews } from './mock.js';
+import {
+  getAlphaVantageHistory,
+  getAlphaVantageQuote,
+  getAlphaVantageResearch,
+  getAlphaVantageNews
+} from './alphavantage.js';
+import { calculateMarketAnalytics, sliceHistoryForRange } from './analytics.js';
 
 const providers = {
   mock: {
     history: getMockHistory,
     quote: getMockQuote,
-    research: getMockResearch
+    research: getMockResearch,
+    news: getMockNews
   },
   alphavantage: {
     history: getAlphaVantageHistory,
     quote: getAlphaVantageQuote,
-    research: getAlphaVantageResearch
+    research: getAlphaVantageResearch,
+    news: getAlphaVantageNews
   }
 };
 
@@ -50,5 +58,48 @@ export function getQuote(symbol) {
 
 export function getResearch(symbol) {
   const normalized = symbol.toUpperCase();
-  return cachedCall(`research:${config.market.provider}:${normalized}`, () => provider().research(normalized), 720);
+  return cachedCall(`research:${config.market.provider}:${normalized}`, () => provider().research(normalized), config.market.researchCacheMinutes);
+}
+
+export function getNews(symbol) {
+  const normalized = symbol.toUpperCase();
+  return cachedCall(`news:${config.market.provider}:${normalized}`, () => provider().news(normalized), config.market.newsCacheMinutes);
+}
+
+function settledValue(result, label, gaps) {
+  if (result.status === 'fulfilled') return result.value;
+  gaps.push(`${label}: ${result.reason?.message || 'unavailable'}`);
+  return null;
+}
+
+export async function getResearchBundle(symbol, chartRange = '1y') {
+  const normalized = symbol.toUpperCase();
+  const [researchResult, historyResult, newsResult] = await Promise.allSettled([
+    getResearch(normalized),
+    getHistory(normalized, '1y'),
+    getNews(normalized)
+  ]);
+  const dataGaps = [];
+  const research = settledValue(researchResult, 'Company fundamentals and quote', dataGaps);
+  const history = settledValue(historyResult, 'One-year price history', dataGaps);
+  const news = settledValue(newsResult, 'Recent company news', dataGaps);
+
+  if (!research && !history) {
+    throw new Error(`No live research data could be retrieved for ${normalized}. ${dataGaps.join(' ')}`);
+  }
+
+  const analytics = history ? calculateMarketAnalytics(history, research || {}) : null;
+  const chartHistory = history ? sliceHistoryForRange(history, chartRange) : null;
+  return {
+    symbol: normalized,
+    provider: config.market.provider,
+    isMockData: config.market.provider === 'mock',
+    chartRange,
+    research,
+    analytics,
+    history,
+    chartHistory,
+    news,
+    dataGaps
+  };
 }

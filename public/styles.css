@@ -180,3 +180,6 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .chat-input { grid-template-columns: 1fr; }
   .scenario-row { grid-template-columns: 1fr 1fr; }
 }
+.source-item a, .source-item strong { display: block; color: var(--accent-dark); font-weight: 800; text-decoration: none; line-height: 1.35; }
+.source-item a:hover { text-decoration: underline; }
+.source-item small { display: block; margin-top: .18rem; color: var(--ink-soft); line-height: 1.35; }

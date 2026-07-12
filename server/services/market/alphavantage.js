@@ -2,11 +2,17 @@ import { config } from '../../config.js';
 
 const BASE_URL = 'https://www.alphavantage.co/query';
 
+function numberOrNull(value) {
+  if (value === undefined || value === null || value === '' || value === 'None' || value === '-') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 async function request(params) {
   if (!config.market.alphaVantageApiKey) throw new Error('ALPHAVANTAGE_API_KEY is not configured');
   const url = new URL(BASE_URL);
   Object.entries({ ...params, apikey: config.market.alphaVantageApiKey }).forEach(([key, value]) => url.searchParams.set(key, value));
-  const response = await fetch(url, { headers: { 'User-Agent': 'Nirvana/0.1' } });
+  const response = await fetch(url, { headers: { 'User-Agent': 'Nirvana/0.2' } });
   if (!response.ok) throw new Error(`Alpha Vantage request failed with HTTP ${response.status}`);
   const data = await response.json();
   if (data.Note) throw new Error(`Alpha Vantage rate limit: ${data.Note}`);
@@ -43,7 +49,7 @@ export async function getAlphaVantageHistory(symbol, range = '3m') {
     symbol: normalized,
     range,
     points,
-    source: 'Alpha Vantage',
+    source: 'Alpha Vantage price history',
     delayed: true,
     asOf: points.at(-1)?.date || null
   };
@@ -56,10 +62,16 @@ export async function getAlphaVantageQuote(symbol) {
   if (!quote || !quote['05. price']) throw new Error(`No quote returned for ${normalized}`);
   return {
     symbol: normalized,
-    price: Number(quote['05. price']),
-    changePct: Number(String(quote['10. change percent'] || '0').replace('%', '')),
+    price: numberOrNull(quote['05. price']),
+    open: numberOrNull(quote['02. open']),
+    high: numberOrNull(quote['03. high']),
+    low: numberOrNull(quote['04. low']),
+    volume: numberOrNull(quote['06. volume']),
+    previousClose: numberOrNull(quote['08. previous close']),
+    change: numberOrNull(quote['09. change']),
+    changePct: numberOrNull(String(quote['10. change percent'] || '0').replace('%', '')),
     asOf: quote['07. latest trading day'] || null,
-    source: 'Alpha Vantage',
+    source: 'Alpha Vantage Global Quote',
     delayed: true
   };
 }
@@ -70,24 +82,88 @@ export async function getAlphaVantageResearch(symbol) {
     request({ function: 'OVERVIEW', symbol: normalized }),
     getAlphaVantageQuote(normalized)
   ]);
+  if (!overview?.Symbol && !overview?.Name) throw new Error(`No company overview returned for ${normalized}`);
   return {
     symbol: normalized,
     companyName: overview.Name || normalized,
     description: overview.Description || '',
+    exchange: overview.Exchange || null,
+    currency: overview.Currency || null,
+    country: overview.Country || null,
     sector: overview.Sector || null,
     industry: overview.Industry || null,
-    marketCapitalization: Number(overview.MarketCapitalization) || null,
-    peRatio: Number(overview.PERatio) || null,
-    forwardPe: Number(overview.ForwardPE) || null,
-    priceToSales: Number(overview.PriceToSalesRatioTTM) || null,
-    revenueTtm: Number(overview.RevenueTTM) || null,
-    profitMargin: Number(overview.ProfitMargin) || null,
-    quarterlyRevenueGrowthYoy: Number(overview.QuarterlyRevenueGrowthYOY) || null,
-    quarterlyEarningsGrowthYoy: Number(overview.QuarterlyEarningsGrowthYOY) || null,
-    analystTargetPrice: Number(overview.AnalystTargetPrice) || null,
-    fiftyTwoWeekHigh: Number(overview['52WeekHigh']) || null,
-    fiftyTwoWeekLow: Number(overview['52WeekLow']) || null,
+    fiscalYearEnd: overview.FiscalYearEnd || null,
+    latestQuarter: overview.LatestQuarter || null,
+    marketCapitalization: numberOrNull(overview.MarketCapitalization),
+    ebitda: numberOrNull(overview.EBITDA),
+    peRatio: numberOrNull(overview.PERatio),
+    forwardPe: numberOrNull(overview.ForwardPE),
+    pegRatio: numberOrNull(overview.PEGRatio),
+    priceToSales: numberOrNull(overview.PriceToSalesRatioTTM),
+    priceToBook: numberOrNull(overview.PriceToBookRatio),
+    evToRevenue: numberOrNull(overview.EVToRevenue),
+    evToEbitda: numberOrNull(overview.EVToEBITDA),
+    eps: numberOrNull(overview.EPS),
+    dilutedEpsTtm: numberOrNull(overview.DilutedEPSTTM),
+    revenueTtm: numberOrNull(overview.RevenueTTM),
+    grossProfitTtm: numberOrNull(overview.GrossProfitTTM),
+    revenuePerShareTtm: numberOrNull(overview.RevenuePerShareTTM),
+    profitMargin: numberOrNull(overview.ProfitMargin),
+    operatingMarginTtm: numberOrNull(overview.OperatingMarginTTM),
+    returnOnAssetsTtm: numberOrNull(overview.ReturnOnAssetsTTM),
+    returnOnEquityTtm: numberOrNull(overview.ReturnOnEquityTTM),
+    quarterlyRevenueGrowthYoy: numberOrNull(overview.QuarterlyRevenueGrowthYOY),
+    quarterlyEarningsGrowthYoy: numberOrNull(overview.QuarterlyEarningsGrowthYOY),
+    dividendPerShare: numberOrNull(overview.DividendPerShare),
+    dividendYield: numberOrNull(overview.DividendYield),
+    beta: numberOrNull(overview.Beta),
+    sharesOutstanding: numberOrNull(overview.SharesOutstanding),
+    analystTargetPrice: numberOrNull(overview.AnalystTargetPrice),
+    analystRatings: {
+      strongBuy: numberOrNull(overview.AnalystRatingStrongBuy),
+      buy: numberOrNull(overview.AnalystRatingBuy),
+      hold: numberOrNull(overview.AnalystRatingHold),
+      sell: numberOrNull(overview.AnalystRatingSell),
+      strongSell: numberOrNull(overview.AnalystRatingStrongSell)
+    },
+    fiftyTwoWeekHigh: numberOrNull(overview['52WeekHigh']),
+    fiftyTwoWeekLow: numberOrNull(overview['52WeekLow']),
+    fiftyDayMovingAverage: numberOrNull(overview['50DayMovingAverage']),
+    twoHundredDayMovingAverage: numberOrNull(overview['200DayMovingAverage']),
     quote,
-    source: 'Alpha Vantage'
+    source: 'Alpha Vantage Company Overview and Global Quote'
+  };
+}
+
+export async function getAlphaVantageNews(symbol) {
+  const normalized = symbol.toUpperCase();
+  const data = await request({
+    function: 'NEWS_SENTIMENT',
+    tickers: normalized,
+    sort: 'LATEST',
+    limit: String(config.market.newsLimit)
+  });
+  const articles = (Array.isArray(data.feed) ? data.feed : []).slice(0, config.market.newsLimit).map((item, index) => {
+    const tickerSentiment = Array.isArray(item.ticker_sentiment)
+      ? item.ticker_sentiment.find((entry) => String(entry.ticker).toUpperCase() === normalized)
+      : null;
+    return {
+      id: `N${index + 1}`,
+      title: item.title || 'Untitled article',
+      summary: item.summary || '',
+      url: item.url || null,
+      source: item.source || item.source_domain || 'Unknown publisher',
+      sourceDomain: item.source_domain || null,
+      publishedAt: item.time_published || null,
+      overallSentimentLabel: item.overall_sentiment_label || null,
+      tickerSentimentLabel: tickerSentiment?.ticker_sentiment_label || null,
+      relevanceScore: numberOrNull(tickerSentiment?.relevance_score)
+    };
+  });
+  return {
+    symbol: normalized,
+    articles,
+    source: 'Alpha Vantage News & Sentiment',
+    asOf: articles[0]?.publishedAt || null
   };
 }

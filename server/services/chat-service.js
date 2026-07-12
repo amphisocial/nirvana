@@ -1,93 +1,94 @@
 import { config } from '../config.js';
 import { loadSkills } from './skill-loader.js';
 import { generateAiResponse } from './ai/index.js';
-import { getHistory, getResearch } from './market/index.js';
+import { getResearchBundle } from './market/index.js';
 
-const RANGE_PATTERNS = [
-  { range: 'ytd', regex: /\b(ytd|year[ -]?to[ -]?date)\b/i },
-  { range: '6m', regex: /\b(6\s*(m|mo|months?)|six\s+months?)\b/i },
-  { range: '3m', regex: /\b(3\s*(m|mo|months?)|three\s+months?)\b/i },
-  { range: '1y', regex: /\b(1\s*(y|yr|year)|one\s+year|12\s*months?)\b/i }
-];
+import { detectRange, detectTicker, isTrendRequest, selectSkillNames } from './chat-routing.js';
 
-const COMMON_WORDS = new Set(['TELL', 'ABOUT', 'TREND', 'STOCK', 'PRICE', 'SHOW', 'OVER', 'LAST', 'MONTH', 'MONTHS', 'YEAR', 'BUY', 'SELL', 'THE', 'TO', 'FOR', 'AND', 'OR']);
+export { detectRange, detectTicker, isTickerQuestion, selectSkillNames } from './chat-routing.js';
 
-const COMPANY_ALIASES = new Map([
-  ['tesla', 'TSLA'],
-  ['nvidia', 'NVDA'],
-  ['apple', 'AAPL'],
-  ['microsoft', 'MSFT'],
-  ['amazon', 'AMZN'],
-  ['alphabet', 'GOOGL'],
-  ['google', 'GOOGL'],
-  ['meta', 'META']
-]);
-
-export function detectRange(message) {
-  return RANGE_PATTERNS.find((item) => item.regex.test(message))?.range || '3m';
+function addSource(sources, seen, source) {
+  const key = source.url || `${source.name}:${source.type}:${source.dataAsOf || ''}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  sources.push(source);
 }
 
-export function detectTicker(message) {
-  const normalizedMessage = String(message).toLowerCase();
-  for (const [company, ticker] of COMPANY_ALIASES) {
-    if (new RegExp(`\\b${company}\\b`, 'i').test(normalizedMessage)) return ticker;
+function sourcesFromBundle(bundle) {
+  const sources = [];
+  const seen = new Set();
+  if (bundle.research) {
+    addSource(sources, seen, {
+      id: 'M1',
+      name: bundle.research.source,
+      type: 'quote, company profile, fundamentals and valuation metrics',
+      dataAsOf: bundle.research.quote?.asOf || bundle.research.latestQuarter || null
+    });
   }
-  const dollar = message.match(/\$([A-Za-z]{1,6})\b/);
-  if (dollar) return dollar[1].toUpperCase();
-  const explicit = message.match(/\b(?:ticker|symbol|stock|trend of|research)\s*[:=-]?\s*([A-Za-z]{1,6})\b/i);
-  if (explicit && !COMMON_WORDS.has(explicit[1].toUpperCase())) return explicit[1].toUpperCase();
-  const uppercase = message.match(/\b[A-Z]{2,6}\b/g)?.find((candidate) => !COMMON_WORDS.has(candidate));
-  return uppercase || null;
+  if (bundle.history) {
+    addSource(sources, seen, {
+      id: 'M2',
+      name: bundle.history.source,
+      type: 'one-year historical market data and calculated trend metrics',
+      dataAsOf: bundle.history.asOf || null
+    });
+  }
+  for (const article of bundle.news?.articles || []) {
+    addSource(sources, seen, {
+      id: article.id,
+      name: article.source,
+      title: article.title,
+      url: article.url,
+      type: 'recent company or sector news',
+      dataAsOf: article.publishedAt || null
+    });
+  }
+  return sources;
 }
 
-function isTrendRequest(message) {
-  return /(trend|chart|graph|price history|performance over|ytd|months?)/i.test(message);
-}
-
-function isResearchRequest(message) {
-  return /(research|analy[sz]e|fundamental|valuation|bull case|bear case|should i buy|should i sell|buy or sell)/i.test(message);
-}
-
-export function selectSkillNames(message) {
-  const names = ['personal-finance-coach'];
-  if (/(retire|retirement|monte carlo|success rate|social security|pension)/i.test(message)) names.push('retirement-planner');
-  if (isTrendRequest(message) || isResearchRequest(message) || detectTicker(message)) names.push('stock-market-analyst');
-  if (/(what[- ]?if|scenario|target price|allocation|concentration|buy|sell)/i.test(message)) names.push('portfolio-scenario-analyst');
-  return [...new Set(names)];
+function chartFromHistory(ticker, range, history) {
+  if (!history?.points?.length) return null;
+  return {
+    type: 'line',
+    title: `${ticker} price trend — ${range.toUpperCase()}`,
+    labels: history.points.map((point) => point.date),
+    datasets: [{ label: `${ticker} close`, data: history.points.map((point) => point.close) }]
+  };
 }
 
 export async function answerChat({ message, householdContext }) {
   const ticker = detectTicker(message);
-  const range = detectRange(message);
+  const explicitTrend = isTrendRequest(message);
+  const chartRange = explicitTrend ? detectRange(message) : '1y';
   const context = { household: householdContext || null };
   let chart = null;
   const sources = [];
+  const sourceKeys = new Set();
 
-  if (ticker && isTrendRequest(message)) {
-    const history = await getHistory(ticker, range);
-    context.marketHistory = history;
-    chart = {
-      type: 'line',
-      title: `${ticker} price trend — ${range.toUpperCase()}`,
-      labels: history.points.map((point) => point.date),
-      datasets: [{ label: `${ticker} close`, data: history.points.map((point) => point.close) }]
-    };
-    sources.push({ name: history.source, dataAsOf: history.asOf, type: 'historical market data' });
-  }
-
-  if (ticker && isResearchRequest(message)) {
-    const research = await getResearch(ticker);
-    context.companyResearch = research;
-    sources.push({ name: research.source, dataAsOf: research.quote?.asOf, type: 'company profile and quote' });
+  if (ticker) {
+    const bundle = await getResearchBundle(ticker, chartRange);
+    context.marketResearch = bundle;
+    chart = chartFromHistory(ticker, chartRange, bundle.chartHistory);
+    for (const source of sourcesFromBundle(bundle)) addSource(sources, sourceKeys, source);
   }
 
   const selectedSkills = selectSkillNames(message);
   const skills = await loadSkills(selectedSkills);
-  const systemPrompt = `You are Nirvana, an educational financial planning and market research assistant.\n\n${skills}\n\nSystem policy:\n- Mode: ${config.ai.systemMode}.\n- Personalized recommendations allowed: ${config.ai.allowPersonalizedRecommendations}.\n- Trade execution allowed: ${config.ai.allowTradeExecution}.\n- Never claim to execute a trade.\n- Use only supplied structured data for current prices, portfolio values, and projections.\n- Include uncertainty and identify missing data.`;
+  const systemPrompt = `You are Nirvana Research AI, an evidence-driven financial planning and equity-research system. Your quality standard is an investment-research briefing, not a generic chatbot answer.\n\n${skills}\n\nOperating policy:\n- Current date: ${new Date().toISOString().slice(0, 10)}.\n- Mode: ${config.ai.systemMode}.\n- Personalized recommendations allowed: ${config.ai.allowPersonalizedRecommendations}.\n- Trade execution allowed: ${config.ai.allowTradeExecution}.\n- Never claim to execute a trade or possess non-public information.\n- Use supplied structured market data for prices, returns, valuation metrics and portfolio calculations.\n- When marketResearch is present, answer the ticker question directly. Never start with “I can help,” a generic checklist, or a claim that current data is unavailable unless the packet itself records a failed source.\n- Distinguish company-specific performance from commodity, interest-rate, regulatory and sector-cycle exposure.\n- Use exact figures from the packet and identify their as-of dates. Do not invent figures.\n- Refer to supplied evidence with source IDs such as [M1], [M2], [N1]. Web-researched facts must be traceable to the web sources returned by the provider.\n- Treat analyst targets as third-party estimates, never as intrinsic value or guaranteed outcomes.\n- Analyze available evidence before discussing missing data. Missing fields should not consume the answer unless they materially block a conclusion.\n- Use household.portfolioSummary and account-level holdings. Never compare aggregate holdings only with one brokerage account.\n- If the market provider is mock, explicitly state that the data is synthetic and do not form a real investment conclusion.\n- End with a research posture and the two or three facts that would change it.\n- Include a brief educational-use disclaimer, but do not bury the analysis beneath disclaimers.`;
 
-  const text = await generateAiResponse({ systemPrompt, userMessage: message, context });
+  const aiResult = await generateAiResponse({
+    systemPrompt,
+    userMessage: message,
+    context,
+    enableWebSearch: Boolean(ticker)
+  });
+
+  for (const source of aiResult.sources || []) {
+    addSource(sources, sourceKeys, { ...source, id: source.id || `W${sources.length + 1}` });
+  }
+
   return {
-    message: text,
+    message: aiResult.text,
     chart,
     sources,
     agents: selectedSkills,

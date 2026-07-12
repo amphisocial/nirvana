@@ -316,7 +316,21 @@ function renderSources(sources = []) {
   sources.forEach((source) => {
     const item = document.createElement('div');
     item.className = 'source-item';
-    item.textContent = `${source.name} · ${source.type}${source.dataAsOf ? ` · data as of ${source.dataAsOf}` : ''}`;
+    const label = `${source.id ? `[${source.id}] ` : ''}${source.title || source.name}`;
+    const details = document.createElement('small');
+    details.textContent = `${source.name}${source.type ? ` · ${source.type}` : ''}${source.dataAsOf ? ` · data as of ${source.dataAsOf}` : ''}`;
+    if (source.url) {
+      const link = document.createElement('a');
+      link.href = source.url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = label;
+      item.append(link, details);
+    } else {
+      const strong = document.createElement('strong');
+      strong.textContent = label;
+      item.append(strong, details);
+    }
     container.append(item);
   });
 }

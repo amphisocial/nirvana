@@ -9,10 +9,13 @@ export async function generateGeminiResponse({ systemPrompt, userMessage, contex
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: systemPrompt }] },
       contents: [{ role: 'user', parts: [{ text: `${userMessage}\n\nStructured Nirvana context:\n${JSON.stringify(context || {}, null, 2)}` }] }],
-      generationConfig: { maxOutputTokens: config.ai.maxOutputTokens, temperature: 0.25 }
+      generationConfig: { maxOutputTokens: config.ai.maxOutputTokens, temperature: 0.2 }
     })
   });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error?.message || `Gemini request failed with HTTP ${response.status}`);
-  return data.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || 'The AI provider returned no text.';
+  return {
+    text: data.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || 'The AI provider returned no text.',
+    sources: []
+  };
 }

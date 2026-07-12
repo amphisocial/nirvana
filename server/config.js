@@ -33,6 +33,8 @@ export const config = {
     geminiApiKey: process.env.GEMINI_API_KEY,
     anthropicApiKey: process.env.ANTHROPIC_API_KEY,
     anthropicVersion: process.env.ANTHROPIC_VERSION || '2023-06-01',
+    webSearchEnabled: bool(process.env.AI_WEB_SEARCH_ENABLED, true),
+    webSearchContextSize: process.env.AI_WEB_SEARCH_CONTEXT_SIZE || 'medium',
     skillsDir: process.env.AI_SKILLS_DIR || 'server/skills',
     enabledSkills: (process.env.AI_ENABLED_SKILLS || '')
       .split(',')
@@ -46,6 +48,9 @@ export const config = {
     provider: (process.env.MARKET_DATA_PROVIDER || 'mock').toLowerCase(),
     alphaVantageApiKey: process.env.ALPHAVANTAGE_API_KEY,
     cacheMinutes: int(process.env.MARKET_CACHE_MINUTES, 30),
+    researchCacheMinutes: int(process.env.MARKET_RESEARCH_CACHE_MINUTES, 720),
+    newsCacheMinutes: int(process.env.MARKET_NEWS_CACHE_MINUTES, 30),
+    newsLimit: int(process.env.MARKET_NEWS_LIMIT, 8),
     delayNotice: process.env.MARKET_DATA_DELAY_NOTICE || 'Market data may be delayed or incomplete.'
   },
   plaid: {

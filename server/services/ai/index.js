@@ -14,5 +14,6 @@ const providers = {
 export async function generateAiResponse(payload) {
   const generate = providers[config.ai.provider];
   if (!generate) throw new Error(`Unsupported AI_PROVIDER: ${config.ai.provider}`);
-  return generate(payload);
+  const result = await generate(payload);
+  return typeof result === 'string' ? { text: result, sources: [] } : result;
 }

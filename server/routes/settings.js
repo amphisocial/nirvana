@@ -9,6 +9,12 @@ settingsRouter.get('/', (req, res) => {
     aiModel: config.ai.model,
     enabledSkills: config.ai.enabledSkills,
     marketDataProvider: config.market.provider,
+    researchCapabilities: {
+      structuredMarketData: config.market.provider !== 'mock',
+      recentNews: config.market.provider !== 'mock',
+      aiWebSearch: config.ai.provider === 'openai' && config.ai.webSearchEnabled,
+      defaultTickerChartRange: '1y'
+    },
     plaid: {
       enabled: config.plaid.enabled,
       aggregationMode: config.plaid.aggregationMode,

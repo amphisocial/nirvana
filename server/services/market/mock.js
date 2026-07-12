@@ -48,14 +48,23 @@ export async function getMockResearch(symbol) {
   return {
     symbol: symbol.toUpperCase(),
     companyName: `${symbol.toUpperCase()} Demo Company`,
-    description: 'Mock company profile used for local development. Configure a live market-data provider before showing research to users.',
-    sector: 'Technology',
-    industry: 'Demonstration Data',
+    description: 'Synthetic company profile used only for local development. Do not show this as real investment research.',
+    sector: 'Demonstration',
+    industry: 'Synthetic Data',
     marketCapitalization: null,
     peRatio: null,
     revenueTtm: null,
     profitMargin: null,
     quote,
     source: 'Nirvana mock market data'
+  };
+}
+
+export async function getMockNews(symbol) {
+  return {
+    symbol: symbol.toUpperCase(),
+    articles: [],
+    source: 'Nirvana mock market data',
+    asOf: null
   };
 }
