@@ -24,6 +24,7 @@ Nirvana Phase 1 is an educational planning and research product. It does not exe
 
 ```bash
 cp .env.example .env
+# If your file browser hides dotfiles, copy env.example.txt instead
 npm install
 npm run db:migrate
 npm run db:seed
@@ -34,22 +35,16 @@ Open `http://localhost:5015`. With `DEMO_MODE=true`, the seeded demo household i
 
 ## Production
 
+Nirvana is designed to run as another PM2 service behind the existing shared Nginx instance used by the other AthenaBot applications.
+
 ```bash
-sudo mkdir -p /var/log/pm2
 npm ci --omit=dev
 npm run db:migrate
 pm2 start ecosystem.config.cjs --env production
 pm2 save
 ```
 
-Recommended Apache proxy:
-
-```apache
-ProxyPreserveHost On
-ProxyPass / http://127.0.0.1:5015/
-ProxyPassReverse / http://127.0.0.1:5015/
-RequestHeader set X-Forwarded-Proto "https"
-```
+The deployment guide includes the dedicated PostgreSQL role/database grants, the Nginx site block for port `5015`, and the Certbot certificate command. Do not install a second Nginx service.
 
 ## Plaid decision
 
@@ -72,5 +67,5 @@ Before public launch: obtain legal review of investment-advice positioning, add 
 
 - `docs/PHASE1_PRODUCT_DECISION.md` — what ships now and what is intentionally deferred
 - `docs/PLAID_PHASE2.md` — production Plaid architecture and security requirements
-- `docs/DEPLOYMENT.md` — PM2 and reverse-proxy deployment
+- `docs/DEPLOYMENT.md` — PostgreSQL grants, PM2, shared Nginx, and Certbot deployment
 - `docs/BUILD_VALIDATION.md` — tests and smoke checks completed
