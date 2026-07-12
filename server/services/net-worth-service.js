@@ -3,7 +3,7 @@ import { buildDerivedLiabilityExpenses } from './retirement-service.js';
 import { projectHouseholdNetWorth } from './net-worth-projection.js';
 
 export async function calculateNetWorthProjection(householdId) {
-  const [planResult, accountsResult, liabilitiesResult, incomeResult, expenseResult] = await Promise.all([
+  const [planResult, accountsResult, liabilitiesResult, incomeResult, expenseResult, contributionResult] = await Promise.all([
     pool.query('SELECT * FROM retirement_plans WHERE household_id = $1', [householdId]),
     pool.query(`
       SELECT id, name, account_type, current_balance::float8 AS current_balance,
@@ -33,7 +33,14 @@ export async function calculateNetWorthProjection(householdId) {
              other_escrow_payment::float8 AS other_escrow_payment
       FROM liabilities WHERE household_id = $1`, [householdId]),
     pool.query('SELECT * FROM income_streams WHERE household_id = $1 ORDER BY annual_amount DESC', [householdId]),
-    pool.query('SELECT * FROM expenses WHERE household_id = $1 ORDER BY annual_amount DESC', [householdId])
+    pool.query('SELECT * FROM expenses WHERE household_id = $1 ORDER BY annual_amount DESC', [householdId]),
+    pool.query(`
+      SELECT id, household_id, name, contribution_type, source_account_id, target_account_id,
+             amount::float8 AS amount, frequency, start_date, end_date,
+             annual_increase_rate::float8 AS annual_increase_rate, notes
+      FROM account_contribution_schedules
+      WHERE household_id = $1
+      ORDER BY start_date NULLS FIRST, created_at`, [householdId])
   ]);
 
   const plan = planResult.rows[0] || {
@@ -59,6 +66,7 @@ export async function calculateNetWorthProjection(householdId) {
     accounts: accountsResult.rows,
     liabilities: liabilitiesResult.rows,
     incomes: incomeResult.rows,
-    expenses: [...explicitExpenses, ...derivedExpenses]
+    expenses: [...explicitExpenses, ...derivedExpenses],
+    contributions: contributionResult.rows
   });
 }

@@ -15,7 +15,7 @@
 
   function investmentAccounts(summary) {
     return (summary?.accounts || []).filter((account) =>
-      ['brokerage', 'ira', '401k', 'retirement'].includes(account.account_type)
+      ['brokerage', 'ira', '401k', 'retirement', '529'].includes(account.account_type)
     );
   }
 
@@ -33,7 +33,7 @@
     const select = $('#portfolioAccountSelect');
     if (!select) return;
     const current = preferredId || selectedAccountId || select.value;
-    select.replaceChildren(new Option('Select a brokerage, IRA or 401(k)', ''));
+    select.replaceChildren(new Option('Select a brokerage, IRA, 401(k), or 529', ''));
     for (const account of accounts) {
       const mode = account.projection_method === 'holdings_monte_carlo' ? 'holdings forecast' : 'profile';
       select.add(new Option(`${account.name} · ${account.account_type.replaceAll('_', ' ')} · ${mode}`, account.id));
@@ -176,7 +176,7 @@
     if (!selectedAccountId) return window.showNirvanaAlert?.('Select an investment account first.');
     const button = $('#calculateAccountForecastButton');
     button.disabled = true;
-    $('#portfolioForecastStatus').textContent = 'Fetching market history and running Monte Carlo…';
+    $('#portfolioForecastStatus').textContent = 'Loading account assumptions, linked schedules, and running Monte Carlo…';
     try {
       const result = await request(`/api/accounts/${selectedAccountId}/forecast`, {
         method: 'POST',
@@ -185,7 +185,9 @@
       portfolio.forecast = result.forecast;
       renderForecast(result.forecast);
       const gaps = result.dataGaps?.length ? ` ${result.dataGaps.length} data gap(s) used fallback assumptions.` : '';
-      $('#portfolioForecastStatus').textContent = `Forecast saved from ${result.positions.length} modeled holdings.${gaps}`;
+      $('#portfolioForecastStatus').textContent = result.positions.length
+        ? `Forecast saved from ${result.positions.length} modeled holdings.${gaps}`
+        : 'Forecast saved from the account fund assumptions and linked contribution/expense schedules.';
       await window.loadNirvanaDashboard?.();
       window.showNirvanaAlert?.('Account forecast calculated and saved.');
     } catch (error) {
@@ -249,7 +251,7 @@
     $('#askAccountAIButton').addEventListener('click', () => {
       const account = accounts.find((row) => row.id === selectedAccountId);
       if (!account) return window.showNirvanaAlert?.('Select an investment account first.');
-      window.openNirvanaAssistant?.(`Review my ${account.name} ${account.account_type.replaceAll('_', ' ')} portfolio, its saved holdings-based forecast, concentration risk, linked cash flows, and impact on retirement readiness.`);
+      window.openNirvanaAssistant?.(`Review my ${account.name} ${account.account_type.replaceAll('_', ' ')} account, its saved forecast, holdings or fund assumptions, contribution schedule, linked future expenses, and impact on retirement or education funding.`);
     });
     resetHoldingForm();
   });

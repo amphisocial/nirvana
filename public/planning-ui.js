@@ -6,6 +6,7 @@
   let netWorthProjection = null;
   let editingIncomeId = null;
   let editingExpenseId = null;
+  let editingContributionId = null;
 
   async function request(url, options = {}) {
     const response = await fetch(url, {
@@ -65,6 +66,51 @@
     return button;
   }
 
+
+  function appendMonthlyListTotal(container, label, description, items, amountKey = 'annual_amount') {
+    const monthlyTotal = items.reduce((sum, item) => {
+      if (amountKey === 'monthly_amount') return sum + Number(item.monthly_amount || 0);
+      return sum + Number(item[amountKey] || 0) / 12;
+    }, 0);
+    const row = document.createElement('div');
+    row.className = 'cashflow-row cashflow-total-row';
+    const details = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = label;
+    const meta = document.createElement('small');
+    meta.textContent = description;
+    details.append(title, meta);
+    const trailing = document.createElement('div');
+    trailing.className = 'cashflow-row-trailing';
+    const amount = document.createElement('strong');
+    amount.textContent = `${currency.format(monthlyTotal)}/mo`;
+    trailing.append(amount);
+    row.append(details, trailing);
+    container.append(row);
+  }
+
+  function formatDate(value) {
+    if (!value) return '';
+    const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+    return Number.isFinite(date.getTime())
+      ? date.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
+      : '';
+  }
+
+  function scheduleRangeLabel(item) {
+    const start = formatDate(item.start_date);
+    const end = formatDate(item.end_date);
+    if (start && end) return `${start}–${end}`;
+    if (start) return `starts ${start}`;
+    if (end) return `through ${end}`;
+    if (item.start_age != null || item.end_age != null) {
+      const from = item.start_age == null ? '' : `age ${item.start_age}`;
+      const to = item.end_age == null ? '' : `age ${item.end_age}`;
+      return from && to ? `${from}–${to}` : (from || `through ${to}`);
+    }
+    return 'ongoing';
+  }
+
   function resetIncomeForm() {
     editingIncomeId = null;
     const form = q('#incomeForm');
@@ -87,10 +133,25 @@
     form.inflationRatePct.value = '2.5';
     form.essential.checked = true;
     form.paymentAccountId.value = '';
+    form.fundingPolicy.value = 'linked_then_liquid';
     q('#expenseFormTitle').textContent = 'Add monthly expense';
     q('#expenseSubmitButton').textContent = 'Add expense';
     q('#expenseCancelEdit').classList.add('hidden');
     togglePostRetirementFields();
+  }
+
+  function resetContributionForm() {
+    editingContributionId = null;
+    const form = q('#contributionForm');
+    if (!form) return;
+    form.reset();
+    form.contributionType.value = 'transfer';
+    form.frequency.value = 'monthly';
+    form.annualIncreaseRatePct.value = '0';
+    q('#contributionFormTitle').textContent = 'Add planned contribution';
+    q('#contributionSubmitButton').textContent = 'Add contribution';
+    q('#contributionCancelEdit').classList.add('hidden');
+    toggleContributionSource();
   }
 
   function editIncome(id) {
@@ -104,6 +165,8 @@
     form.frequency.value = item.frequency || 'monthly';
     form.startAge.value = item.start_age ?? '';
     form.endAge.value = item.end_age ?? '';
+    form.startDate.value = item.start_date ? String(item.start_date).slice(0, 10) : '';
+    form.endDate.value = item.end_date ? String(item.end_date).slice(0, 10) : '';
     form.inflationRatePct.value = Number(item.inflation_rate || 0) * 100;
     form.taxable.checked = item.taxable !== false;
     form.endsAtRetirement.checked = Boolean(item.ends_at_retirement);
@@ -129,6 +192,9 @@
     form.postRetirementFrequency.value = item.post_retirement_frequency || 'monthly';
     form.startAge.value = item.start_age ?? '';
     form.endAge.value = item.end_age ?? '';
+    form.startDate.value = item.start_date ? String(item.start_date).slice(0, 10) : '';
+    form.endDate.value = item.end_date ? String(item.end_date).slice(0, 10) : '';
+    form.fundingPolicy.value = item.funding_policy || 'linked_then_liquid';
     form.inflationRatePct.value = Number(item.inflation_rate || 0) * 100;
     form.essential.checked = item.essential !== false;
     form.paymentAccountId.value = item.payment_account_id || '';
@@ -141,6 +207,37 @@
   }
 
 
+  function editContribution(id) {
+    const item = (planning.contributions || []).find((row) => row.id === id);
+    if (!item) return;
+    editingContributionId = id;
+    const form = q('#contributionForm');
+    form.name.value = item.name || '';
+    form.contributionType.value = item.contribution_type || 'transfer';
+    form.sourceAccountId.value = item.source_account_id || '';
+    form.targetAccountId.value = item.target_account_id || '';
+    form.amount.value = Number(item.amount || 0).toFixed(2);
+    form.frequency.value = item.frequency || 'monthly';
+    form.startDate.value = item.start_date ? String(item.start_date).slice(0, 10) : '';
+    form.endDate.value = item.end_date ? String(item.end_date).slice(0, 10) : '';
+    form.annualIncreaseRatePct.value = Number(item.annual_increase_rate || 0) * 100;
+    form.notes.value = item.notes || '';
+    q('#contributionFormTitle').textContent = 'Edit planned contribution';
+    q('#contributionSubmitButton').textContent = 'Save changes';
+    q('#contributionCancelEdit').classList.remove('hidden');
+    toggleContributionSource();
+    form.name.focus();
+  }
+
+  function toggleContributionSource() {
+    const form = q('#contributionForm');
+    if (!form) return;
+    const isTransfer = form.contributionType.value === 'transfer';
+    q('#contributionSourceLabel').classList.toggle('hidden', !isTransfer);
+    form.sourceAccountId.required = isTransfer;
+    if (!isTransfer) form.sourceAccountId.value = '';
+  }
+
   function linkedAccountName(id) {
     if (!id) return 'default cash account';
     return planning.accounts.find((account) => account.id === id)?.name || 'linked account';
@@ -148,15 +245,18 @@
 
   function populateCashflowAccountSelects() {
     const selects = [
-      [q('#incomeDepositAccountSelect'), 'Use default cash account'],
-      [q('#expensePaymentAccountSelect'), 'Use default cash account']
+      [q('#incomeDepositAccountSelect'), 'Use default cash account', () => true],
+      [q('#expensePaymentAccountSelect'), 'Use default cash account', () => true],
+      [q('#contributionSourceAccountSelect'), 'Choose source account', (account) => !['property', 'other_asset'].includes(account.account_type)],
+      [q('#contributionTargetAccountSelect'), 'Choose 529, IRA, 401(k), brokerage, or HSA', (account) => ['529', 'ira', '401k', 'retirement', 'brokerage', 'hsa'].includes(account.account_type)]
     ];
-    for (const [select, placeholder] of selects) {
+    for (const [select, placeholder, allow] of selects) {
       if (!select) continue;
       const selected = select.value;
       select.replaceChildren(new Option(placeholder, ''));
       for (const account of planning.accounts || []) {
-        if (account.account_type === 'property' || account.account_type === 'other_asset') continue;
+        if (allow && !allow(account)) continue;
+        if (!allow && (account.account_type === 'property' || account.account_type === 'other_asset')) continue;
         select.add(new Option(`${account.name} · ${String(account.account_type).replaceAll('_', ' ')}`, account.id));
       }
       select.value = selected;
@@ -170,6 +270,7 @@
       container.innerHTML = '<div class="empty-inline">Add salary, Social Security, pension, rental, or other income.</div>';
       return;
     }
+    appendMonthlyListTotal(container, 'Total monthly income', 'All income sources shown below', planning.incomes);
     planning.incomes.forEach((item) => {
       const row = document.createElement('div');
       row.className = 'cashflow-row';
@@ -177,7 +278,7 @@
       const title = document.createElement('strong');
       title.textContent = item.name;
       const meta = document.createElement('small');
-      meta.textContent = `${String(item.income_type).replaceAll('_', ' ')} · ${item.ends_at_retirement ? 'ends at retirement' : 'continues by age range'} · deposits to ${linkedAccountName(item.deposit_account_id)}`;
+      meta.textContent = `${String(item.income_type).replaceAll('_', ' ')} · ${scheduleRangeLabel(item)} · ${item.ends_at_retirement ? 'ends at retirement' : 'continues by schedule'} · deposits to ${linkedAccountName(item.deposit_account_id)}`;
       details.append(title, meta);
       const trailing = document.createElement('div');
       trailing.className = 'cashflow-row-trailing';
@@ -209,6 +310,7 @@
       container.innerHTML = '<div class="empty-inline">Add housing, healthcare, travel, food, and other recurring expenses.</div>';
       return;
     }
+    appendMonthlyListTotal(container, 'Total monthly expenses', 'All recurring expenses shown below', planning.expenses);
     planning.expenses.forEach((item) => {
       const row = document.createElement('div');
       row.className = 'cashflow-row';
@@ -216,8 +318,8 @@
       const title = document.createElement('strong');
       title.textContent = item.name;
       const meta = document.createElement('small');
-      const end = item.end_age == null ? '' : ` · ends age ${item.end_age}`;
-      meta.textContent = `${String(item.category).replaceAll('_', ' ')} · ${retirementBehaviorLabel(item.retirement_behavior)}${end} · paid from ${linkedAccountName(item.payment_account_id)}`;
+      const funding = item.funding_policy === 'linked_only' ? 'selected account only' : 'selected account, then liquid assets';
+      meta.textContent = `${String(item.category).replaceAll('_', ' ')} · ${scheduleRangeLabel(item)} · ${retirementBehaviorLabel(item.retirement_behavior)} · paid from ${linkedAccountName(item.payment_account_id)} · ${funding}`;
       details.append(title, meta);
       const trailing = document.createElement('div');
       trailing.className = 'cashflow-row-trailing';
@@ -249,12 +351,64 @@
     });
   }
 
+  function renderContributionList() {
+    const container = q('#contributionList');
+    if (!container) return;
+    container.replaceChildren();
+    const contributions = planning.contributions || [];
+    if (!contributions.length) {
+      container.innerHTML = '<div class="empty-inline">Add recurring deposits to a 529, IRA, 401(k), brokerage, or HSA.</div>';
+      return;
+    }
+    appendMonthlyListTotal(
+      container,
+      'Total scheduled contributions',
+      'Monthly equivalent of all schedules shown below',
+      contributions,
+      'monthly_amount'
+    );
+    for (const item of contributions) {
+      const row = document.createElement('div');
+      row.className = 'cashflow-row';
+      const details = document.createElement('div');
+      const title = document.createElement('strong');
+      title.textContent = item.name;
+      const meta = document.createElement('small');
+      const source = item.contribution_type === 'transfer'
+        ? linkedAccountName(item.source_account_id)
+        : item.contribution_type.replaceAll('_', ' ');
+      meta.textContent = `${source} → ${linkedAccountName(item.target_account_id)} · ${scheduleRangeLabel(item)} · ${(Number(item.annual_increase_rate || 0) * 100).toFixed(1)}% annual increase`;
+      details.append(title, meta);
+      const trailing = document.createElement('div');
+      trailing.className = 'cashflow-row-trailing';
+      const amount = document.createElement('strong');
+      amount.textContent = `${currency.format(Number(item.monthly_amount || 0))}/mo`;
+      const actions = document.createElement('div');
+      actions.className = 'row-actions';
+      actions.append(
+        createActionButton('Edit', 'row-action', () => editContribution(item.id)),
+        createActionButton('Delete', 'row-action danger', async () => {
+          if (!window.confirm(`Delete "${item.name}"?`)) return;
+          try {
+            await request(`/api/planning/contributions/${item.id}`, { method: 'DELETE' });
+            await refreshEverything();
+            alertUser('Contribution schedule deleted.');
+          } catch (error) { alertUser(error.message); }
+        })
+      );
+      trailing.append(amount, actions);
+      row.append(details, trailing);
+      container.append(row);
+    }
+  }
+
   function renderPlanningMetrics() {
     const metrics = planning.metrics || {};
     q('#currentIncomeMetric').textContent = currency.format(metrics.currentMonthlyIncome || 0);
     q('#currentExpenseMetric').textContent = currency.format(metrics.currentMonthlyExpenses || 0);
     q('#currentSurplusMetric').textContent = currency.format(metrics.currentMonthlySurplus || 0);
     q('#retirementGapMetric').textContent = currency.format(metrics.retirementMonthlyGap || 0);
+    q('#currentContributionMetric').textContent = currency.format(metrics.currentMonthlyContributions || 0);
   }
 
   function populateLinkedProperties(summary) {
@@ -389,7 +543,8 @@
           { type: 'line', label: 'Net worth', data: projection.timeline.map((row) => row.netWorth), borderColor: colors.blueDark, backgroundColor: colors.blueDark, borderWidth: 3, pointRadius: (context) => projection.timeline[context.dataIndex]?.events?.length ? 4 : 0, pointHoverRadius: 5, tension: .25, yAxisID: 'yWorth' },
           { type: 'line', label: 'Inflow', data: projection.timeline.map((row) => row.annualInflow), borderColor: '#3d8bd4', backgroundColor: '#3d8bd4', borderDash: [5, 3], borderWidth: 2, pointRadius: 0, tension: .2, yAxisID: 'yCash' },
           { type: 'line', label: 'Outflow', data: projection.timeline.map((row) => -row.annualOutflow), borderColor: '#7aa6cf', backgroundColor: '#7aa6cf', borderDash: [2, 3], borderWidth: 2, pointRadius: 0, tension: .2, yAxisID: 'yCash' },
-          { type: 'line', label: 'Net cash flow', data: projection.timeline.map((row) => row.annualNetCashFlow), borderColor: '#183f66', backgroundColor: '#183f66', borderWidth: 2.5, pointRadius: 0, tension: .2, yAxisID: 'yCash' }
+          { type: 'line', label: 'Net cash flow', data: projection.timeline.map((row) => row.annualNetCashFlow), borderColor: '#183f66', backgroundColor: '#183f66', borderWidth: 2.5, pointRadius: 0, tension: .2, yAxisID: 'yCash' },
+          { type: 'line', label: 'Scheduled contributions', data: projection.timeline.map((row) => row.annualContributions || 0), borderColor: '#5aa3e6', backgroundColor: '#5aa3e6', borderDash: [8, 4], borderWidth: 2, pointRadius: 0, tension: .2, yAxisID: 'yCash' }
         ]
       },
       options: {
@@ -427,6 +582,7 @@
     renderPlanningMetrics();
     renderIncomeList();
     renderExpenseList();
+    renderContributionList();
   }
 
   async function refreshEverything() {
@@ -447,6 +603,8 @@
       frequency: form.frequency.value,
       startAge: form.startAge.value || null,
       endAge: form.endAge.value || null,
+      startDate: form.startDate.value || null,
+      endDate: form.endDate.value || null,
       inflationRate: Number(form.inflationRatePct.value || 0) / 100,
       taxable: form.taxable.checked,
       endsAtRetirement: form.endsAtRetirement.checked,
@@ -466,9 +624,29 @@
       postRetirementFrequency: form.postRetirementFrequency.value,
       startAge: form.startAge.value || null,
       endAge: form.endAge.value || null,
+      startDate: form.startDate.value || null,
+      endDate: form.endDate.value || null,
+      fundingPolicy: form.fundingPolicy.value,
       inflationRate: Number(form.inflationRatePct.value || 0) / 100,
       essential: form.essential.checked,
       paymentAccountId: form.paymentAccountId.value || null,
+      notes: form.notes.value || null
+    };
+  }
+
+  function contributionPayload(form) {
+    return {
+      name: form.name.value,
+      contributionType: form.contributionType.value,
+      sourceAccountId: form.contributionType.value === 'transfer'
+        ? (form.sourceAccountId.value || null)
+        : null,
+      targetAccountId: form.targetAccountId.value,
+      amount: form.amount.value,
+      frequency: form.frequency.value,
+      startDate: form.startDate.value || null,
+      endDate: form.endDate.value || null,
+      annualIncreaseRate: Number(form.annualIncreaseRatePct.value || 0) / 100,
       notes: form.notes.value || null
     };
   }
@@ -482,6 +660,8 @@
     q('#retirementBehavior').addEventListener('change', togglePostRetirementFields);
     q('#incomeCancelEdit').addEventListener('click', resetIncomeForm);
     q('#expenseCancelEdit').addEventListener('click', resetExpenseForm);
+    q('#contributionCancelEdit').addEventListener('click', resetContributionForm);
+    q('#contributionType').addEventListener('change', toggleContributionSource);
 
     q('#incomeForm').addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -519,11 +699,33 @@
       finally { button.disabled = false; }
     });
 
+    q('#contributionForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const button = event.submitter;
+      button.disabled = true;
+      try {
+        const editing = Boolean(editingContributionId);
+        await request(
+          editing ? `/api/planning/contributions/${editingContributionId}` : '/api/planning/contributions',
+          {
+            method: editing ? 'PUT' : 'POST',
+            body: JSON.stringify(contributionPayload(form))
+          }
+        );
+        resetContributionForm();
+        await refreshEverything();
+        alertUser(editing ? 'Contribution schedule updated.' : 'Contribution schedule added.');
+      } catch (error) { alertUser(error.message); }
+      finally { button.disabled = false; }
+    });
+
     q('#retirementForm').addEventListener('submit', () => {
       window.setTimeout(() => refreshEverything().catch((error) => alertUser(error.message)), 700);
     });
 
     resetIncomeForm();
     resetExpenseForm();
+    resetContributionForm();
   });
 })();

@@ -99,7 +99,7 @@ export function buildDerivedLiabilityExpenses(liabilities = [], explicitExpenses
 }
 
 export async function loadRetirementData(householdId) {
-  const [planResult, accountsResult, incomeResult, expenseResult, liabilityResult] = await Promise.all([
+  const [planResult, accountsResult, incomeResult, expenseResult, liabilityResult, contributionResult] = await Promise.all([
     pool.query('SELECT * FROM retirement_plans WHERE household_id = $1', [householdId]),
     pool.query(`
       SELECT id, name, institution, account_type,
@@ -121,22 +121,26 @@ export async function loadRetirementData(householdId) {
       ORDER BY current_balance DESC`, [householdId]),
     pool.query(`
       SELECT id, name, income_type, annual_amount::float8 AS annual_amount,
-             frequency, start_age, end_age,
+             frequency, start_age, end_age, start_date, end_date,
              inflation_rate::float8 AS inflation_rate,
              taxable, ends_at_retirement, deposit_account_id, notes
       FROM income_streams
       WHERE household_id = $1
       ORDER BY annual_amount DESC`, [householdId]),
     pool.query(`
-      SELECT id, name, category, annual_amount::float8 AS annual_amount,
-             frequency,
-             post_retirement_annual_amount::float8 AS post_retirement_annual_amount,
-             post_retirement_frequency, retirement_behavior,
-             start_age, end_age, inflation_rate::float8 AS inflation_rate,
-             essential, linked_liability_id, payment_account_id, notes
-      FROM expenses
-      WHERE household_id = $1
-      ORDER BY annual_amount DESC`, [householdId]),
+      SELECT e.id, e.name, e.category, e.annual_amount::float8 AS annual_amount,
+             e.frequency,
+             e.post_retirement_annual_amount::float8 AS post_retirement_annual_amount,
+             e.post_retirement_frequency, e.retirement_behavior,
+             e.start_age, e.end_age, e.start_date, e.end_date,
+             e.inflation_rate::float8 AS inflation_rate,
+             e.essential, e.linked_liability_id, e.payment_account_id,
+             e.funding_policy, e.notes,
+             a.account_type AS payment_account_type
+      FROM expenses e
+      LEFT JOIN accounts a ON a.id = e.payment_account_id
+      WHERE e.household_id = $1
+      ORDER BY e.annual_amount DESC`, [householdId]),
     pool.query(`
       SELECT id, household_id, name, liability_type,
              current_balance::float8 AS current_balance,
@@ -153,7 +157,17 @@ export async function loadRetirementData(householdId) {
              hoa_payment::float8 AS hoa_payment,
              other_escrow_payment::float8 AS other_escrow_payment
       FROM liabilities
-      WHERE household_id = $1`, [householdId])
+      WHERE household_id = $1`, [householdId]),
+    pool.query(`
+      SELECT c.id, c.name, c.contribution_type, c.source_account_id,
+             c.target_account_id, c.amount::float8 AS amount, c.frequency,
+             c.start_date, c.end_date,
+             c.annual_increase_rate::float8 AS annual_increase_rate,
+             target.account_type AS target_account_type
+      FROM account_contribution_schedules c
+      JOIN accounts target ON target.id = c.target_account_id
+      WHERE c.household_id = $1
+      ORDER BY c.start_date NULLS FIRST, c.created_at`, [householdId])
   ]);
 
   const plan = planResult.rows[0] || null;
@@ -170,7 +184,8 @@ export async function loadRetirementData(householdId) {
     expenses: [...explicitExpenses, ...derivedExpenses],
     explicitExpenses,
     derivedExpenses,
-    liabilities: liabilityResult.rows
+    liabilities: liabilityResult.rows,
+    contributions: contributionResult.rows
   };
 }
 
@@ -179,6 +194,8 @@ export async function calculateRetirementProjection(householdId, options = {}) {
   if (!data.plan) return null;
   const portfolio = summarizeInvestableAccounts(data.accounts, data.plan);
   const properties = data.accounts.filter((row) => row.account_type === 'property');
+  const designatedExpenses = data.expenses.filter((row) => row.payment_account_type === '529');
+  const retirementExpenses = data.expenses.filter((row) => row.payment_account_type !== '529');
   const plan = data.plan;
   const projection = evaluateRetirementPlan({
     currentAge: plan.current_age,
@@ -194,7 +211,8 @@ export async function calculateRetirementProjection(householdId, options = {}) {
     volatility: portfolio.volatility,
     inflation: plan.inflation,
     incomes: data.incomes,
-    expenses: data.expenses,
+    expenses: retirementExpenses,
+    contributions: data.contributions,
     properties,
     simulationCount: options.simulationCount || 1000,
     searchSimulationCount: options.searchSimulationCount || 350
@@ -211,10 +229,12 @@ export async function calculateRetirementProjection(householdId, options = {}) {
   projection.dataCompleteness = {
     incomeCount: data.incomes.length,
     expenseCount: data.expenses.length,
+    designated529ExpenseCount: designatedExpenses.length,
+    contributionScheduleCount: data.contributions.length,
     explicitExpenseCount: data.explicitExpenses.length,
     derivedLiabilityExpenseCount: data.derivedExpenses.length,
     hasPrimaryResidence: properties.some((row) => row.is_primary_residence),
-    usesFallbackSpending: data.expenses.length === 0
+    usesFallbackSpending: retirementExpenses.length === 0
   };
   return projection;
 }

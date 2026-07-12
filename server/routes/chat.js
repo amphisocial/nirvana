@@ -14,7 +14,7 @@ function sum(rows, key) {
   return rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
 }
 
-function buildHouseholdContext(accounts, liabilities, holdings, plan, incomes, expenses, projection) {
+function buildHouseholdContext(accounts, liabilities, holdings, plan, incomes, expenses, contributions, projection) {
   const accountRows = accounts.map((row) => ({
     ...row,
     current_balance: Number(row.current_balance) || 0,
@@ -112,6 +112,11 @@ function buildHouseholdContext(accounts, liabilities, holdings, plan, incomes, e
       annual_amount: Number(row.annual_amount || 0),
       inflation_rate: Number(row.inflation_rate || 0)
     })),
+    contributionSchedules: contributions.map((row) => ({
+      ...row,
+      amount: Number(row.amount || 0),
+      annual_increase_rate: Number(row.annual_increase_rate || 0)
+    })),
     expenses: expenses.map((row) => ({
       ...row,
       annual_amount: Number(row.annual_amount || 0),
@@ -137,7 +142,7 @@ function buildHouseholdContext(accounts, liabilities, holdings, plan, incomes, e
 }
 
 async function getHouseholdContext(householdId) {
-  const [accounts, liabilities, holdings, plan, incomes, expenses, projection] = await Promise.all([
+  const [accounts, liabilities, holdings, plan, incomes, expenses, contributions, projection] = await Promise.all([
     pool.query(
       `SELECT id, name, institution, account_type, current_balance::float8 AS current_balance,
               projection_method, investment_style, expected_return::float8 AS expected_return,
@@ -187,6 +192,14 @@ async function getHouseholdContext(householdId) {
     pool.query('SELECT * FROM retirement_plans WHERE household_id = $1', [householdId]),
     pool.query('SELECT * FROM income_streams WHERE household_id = $1 ORDER BY annual_amount DESC', [householdId]),
     pool.query('SELECT * FROM expenses WHERE household_id = $1 ORDER BY annual_amount DESC', [householdId]),
+    pool.query(`
+      SELECT c.*, source.name AS source_account_name, target.name AS target_account_name,
+             target.account_type AS target_account_type
+      FROM account_contribution_schedules c
+      LEFT JOIN accounts source ON source.id = c.source_account_id
+      JOIN accounts target ON target.id = c.target_account_id
+      WHERE c.household_id = $1
+      ORDER BY c.start_date NULLS FIRST, c.created_at`, [householdId]),
     calculateRetirementProjection(householdId, { simulationCount: 350, searchSimulationCount: 250 })
   ]);
   return buildHouseholdContext(
@@ -196,6 +209,7 @@ async function getHouseholdContext(householdId) {
     plan.rows[0] || null,
     incomes.rows,
     expenses.rows,
+    contributions.rows,
     projection
   );
 }

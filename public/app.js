@@ -199,7 +199,7 @@ function isRetirementType(type) {
 }
 
 function isInvestmentType(type) {
-  return ['brokerage', 'ira', '401k', 'retirement'].includes(type);
+  return ['brokerage', 'ira', '401k', 'retirement', '529'].includes(type);
 }
 
 function refreshInvestmentProfile(resetValues = false) {

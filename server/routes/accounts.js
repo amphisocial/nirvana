@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { pool, withTransaction } from '../db.js';
 import { expenseAtAge, incomeAtAge } from '../services/retirement-cashflow-engine.js';
 import { getQuote } from '../services/market/index.js';
+import { linkedContributionForAccount } from '../services/account-contribution.js';
 import {
   estimatePortfolioMoments,
   researchHoldingsForForecast,
@@ -19,7 +20,7 @@ import {
 export const accountsRouter = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
 
-const investmentAccountTypes = new Set(['brokerage', 'ira', '401k', 'retirement']);
+const investmentAccountTypes = new Set(['brokerage', 'ira', '401k', 'retirement', '529']);
 const retirementAccountTypes = new Set(['ira', '401k', 'retirement']);
 
 const styleDefaults = {
@@ -565,7 +566,7 @@ accountsRouter.delete('/:id/holdings/:holdingId', async (req, res, next) => {
 accountsRouter.post('/:id/forecast', async (req, res, next) => {
   try {
     const account = await ensureOwnedAccount(req.params.id, req.householdId, investmentAccountTypes);
-    const [holdingsResult, planResult, incomeResult, expenseResult] = await Promise.all([
+    const [holdingsResult, planResult, incomeResult, expenseResult, contributionResult] = await Promise.all([
       pool.query(`
         SELECT id, symbol, name, asset_class,
                quantity::float8 AS quantity,
@@ -576,10 +577,18 @@ accountsRouter.post('/:id/forecast', async (req, res, next) => {
       pool.query(`SELECT * FROM income_streams
                   WHERE household_id=$1 AND deposit_account_id=$2`, [req.householdId, account.id]),
       pool.query(`SELECT * FROM expenses
-                  WHERE household_id=$1 AND payment_account_id=$2`, [req.householdId, account.id])
+                  WHERE household_id=$1 AND payment_account_id=$2`, [req.householdId, account.id]),
+      pool.query(`
+        SELECT id, contribution_type, source_account_id, target_account_id,
+               amount::float8 AS amount, frequency, start_date, end_date,
+               annual_increase_rate::float8 AS annual_increase_rate
+        FROM account_contribution_schedules
+        WHERE household_id=$1 AND (target_account_id=$2 OR source_account_id=$2)`,
+      [req.householdId, account.id])
     ]);
-    if (!holdingsResult.rowCount) {
-      return res.status(400).json({ error: 'Add at least one stock or ETF before calculating this account forecast' });
+    if (!holdingsResult.rowCount && ['brokerage', 'ira'].includes(account.account_type)
+        && account.projection_method === 'holdings_monte_carlo') {
+      return res.status(400).json({ error: 'Add at least one stock or ETF before calculating this holdings-based account forecast' });
     }
 
     const plan = planResult.rows[0] || {};
@@ -597,14 +606,37 @@ accountsRouter.post('/:id/forecast', async (req, res, next) => {
         (sum, row) => sum + expenseAtAge(row, age, currentAge, retirementAge),
         0
       );
-      return afterTaxIncome - expenses;
+      const year = new Date().getUTCFullYear() + index;
+      const scheduledContributions = contributionResult.rows.reduce(
+        (sum, row) => sum + linkedContributionForAccount(
+          row,
+          account.id,
+          year,
+          new Date().getUTCFullYear()
+        ),
+        0
+      );
+      return afterTaxIncome - expenses + scheduledContributions;
     });
     const annualLinkedCashFlow = annualLinkedCashFlows[0] || 0;
     const fallback = {
       expectedReturn: Number(account.expected_return ?? 0.07),
       volatility: Number(account.expected_volatility ?? 0.17)
     };
-    const research = await researchHoldingsForForecast(holdingsResult.rows, fallback, { maxSymbols: 12 });
+    const research = holdingsResult.rowCount
+      ? await researchHoldingsForForecast(holdingsResult.rows, fallback, { maxSymbols: 12 })
+      : {
+          positions: [],
+          moments: {
+            expectedReturn: fallback.expectedReturn,
+            volatility: fallback.volatility,
+            historicalReturn: null,
+            historicalVolatility: null,
+            observationCount: 0,
+            source: 'Account investment-profile forecast'
+          },
+          dataGaps: []
+        };
     const startingValue = research.positions.reduce((sum, position) => sum + Number(position.value || 0), 0)
       || Number(account.current_balance || 0);
     const forecast = simulateAccountForecast({
@@ -617,10 +649,16 @@ accountsRouter.post('/:id/forecast', async (req, res, next) => {
       simulationCount: Number(req.body?.simulationCount || 1000),
       seed: 20260712
     });
+    const forecastMethod = holdingsResult.rowCount ? 'holdings_monte_carlo' : 'profile';
     const assumptions = [
-      'Forecast uses saved quantities and the latest available one-year market history for up to 12 holdings.',
-      'Historical return is shrunk toward the account planning assumption to reduce one-year sample noise.',
-      'Linked income and expenses follow their saved start, end, retirement, tax, and inflation settings in this account-only forecast.',
+      holdingsResult.rowCount
+        ? 'Forecast uses saved quantities and the latest available one-year market history for up to 12 holdings.'
+        : 'Forecast uses the account saved expected return and volatility because no individual holdings are required for this fund-based account.',
+      holdingsResult.rowCount
+        ? 'Historical return is shrunk toward the account planning assumption to reduce one-year sample noise.'
+        : 'The saved fund or allocation assumption is a planning input, not a prediction.',
+      'Linked income, expenses, and contribution schedules follow their saved dates, retirement, tax, and inflation settings in this account-only forecast.',
+      'Transfers from another owned account reduce the source account and increase this account without increasing household net worth. External and employer contributions are new inflows.',
       'Taxes, trading, fees, and future allocation changes are excluded. This is a planning simulation, not a prediction.'
     ];
 
@@ -637,14 +675,14 @@ accountsRouter.post('/:id/forecast', async (req, res, next) => {
       await client.query(`
         UPDATE accounts
         SET current_balance=$1,
-            projection_method='holdings_monte_carlo',
-            forecast_expected_return=$2,
-            forecast_volatility=$3,
+            projection_method=$2,
+            forecast_expected_return=$3,
+            forecast_volatility=$4,
             forecast_as_of=now(),
-            forecast_source=$4,
+            forecast_source=$5,
             last_verified_at=now(), updated_at=now()
-        WHERE id=$5 AND household_id=$6`, [
-        startingValue, forecast.expectedReturn, forecast.volatility,
+        WHERE id=$6 AND household_id=$7`, [
+        startingValue, forecastMethod, forecast.expectedReturn, forecast.volatility,
         research.moments.source, account.id, req.householdId
       ]);
       const result = await client.query(`

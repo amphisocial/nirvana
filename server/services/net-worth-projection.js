@@ -1,5 +1,6 @@
 import { expenseAtAge, incomeAtAge } from './retirement-cashflow-engine.js';
 import { advanceLoanBalance, loanTermPosition } from './loan-schedule.js';
+import { contributionAtYear } from './account-contribution.js';
 
 function number(value, fallback = 0) {
   const parsed = Number(value);
@@ -37,7 +38,7 @@ function preferredDefaultAccount(accounts) {
     || null;
 }
 
-function applyFlow(accounts, requestedAccountId, amount, cashDeficitState) {
+function applyFlow(accounts, requestedAccountId, amount, cashDeficitState, options = {}) {
   if (!amount) return;
   const defaultAccount = preferredDefaultAccount(accounts);
   const requested = requestedAccountId
@@ -54,9 +55,11 @@ function applyFlow(accounts, requestedAccountId, amount, cashDeficitState) {
   let remaining = Math.abs(amount);
   const drawOrder = [];
   if (target && isLiquidAccount(target)) drawOrder.push(target);
-  if (defaultAccount && !drawOrder.includes(defaultAccount)) drawOrder.push(defaultAccount);
-  for (const account of accounts) {
-    if (isLiquidAccount(account) && !drawOrder.includes(account)) drawOrder.push(account);
+  if (!options.linkedOnly) {
+    if (defaultAccount && !drawOrder.includes(defaultAccount)) drawOrder.push(defaultAccount);
+    for (const account of accounts) {
+      if (isLiquidAccount(account) && !drawOrder.includes(account)) drawOrder.push(account);
+    }
   }
 
   for (const account of drawOrder) {
@@ -148,9 +151,9 @@ function categories(accounts, liabilities, cashDeficit) {
   return { savingsInvestments, realEstate, otherAssets, debtBalance, netWorth };
 }
 
-function annualCashflow({ age, currentAge, retirementAge, incomes, expenses, taxRate }) {
+function annualCashflow({ age, currentAge, retirementAge, incomes, expenses, taxRate, currentYear }) {
   const income = incomes.reduce((total, item) => {
-    const value = incomeAtAge(item, age, currentAge, retirementAge);
+    const value = incomeAtAge(item, age, currentAge, retirementAge, currentYear);
     total.gross += value.gross;
     total.taxable += value.taxable;
     total.nonTaxable += value.nonTaxable;
@@ -158,10 +161,37 @@ function annualCashflow({ age, currentAge, retirementAge, incomes, expenses, tax
   }, { gross: 0, taxable: 0, nonTaxable: 0 });
   const afterTax = income.nonTaxable + income.taxable * (1 - taxRate);
   const outflow = expenses.reduce(
-    (sum, item) => sum + expenseAtAge(item, age, currentAge, retirementAge),
+    (sum, item) => sum + expenseAtAge(item, age, currentAge, retirementAge, currentYear),
     0
   );
   return { grossIncome: income.gross, afterTaxIncome: afterTax, outflow, net: afterTax - outflow };
+}
+
+function annualContributionSummary(contributions, year, currentYear) {
+  return contributions.reduce((summary, schedule) => {
+    const amount = contributionAtYear(schedule, year, currentYear);
+    if (!amount) return summary;
+    summary.total += amount;
+    if (['external', 'employer_match'].includes(schedule.contribution_type)) {
+      summary.external += amount;
+    } else {
+      summary.transfers += amount;
+    }
+    return summary;
+  }, { total: 0, external: 0, transfers: 0 });
+}
+
+function applyContributionSchedules(accounts, contributions, year, currentYear, cashDeficit) {
+  for (const schedule of contributions) {
+    const amount = contributionAtYear(schedule, year, currentYear);
+    if (!(amount > 0)) continue;
+    const target = accounts.find((account) => account.id === schedule.target_account_id);
+    if (!target) continue;
+    if (schedule.contribution_type === 'transfer' && schedule.source_account_id) {
+      applyFlow(accounts, schedule.source_account_id, -amount, cashDeficit, { linkedOnly: true });
+    }
+    target.balance += amount;
+  }
 }
 
 function updateLiabilities(liabilities) {
@@ -210,6 +240,7 @@ export function projectHouseholdNetWorth(input) {
   }));
   const incomes = input.incomes || [];
   const expenses = input.expenses || [];
+  const contributions = input.contributions || [];
   const timeline = [];
   const cashDeficit = { value: 0 };
   const appliedPropertyEvents = new Set();
@@ -220,7 +251,9 @@ export function projectHouseholdNetWorth(input) {
       cashDeficit, appliedEvents: appliedPropertyEvents
     });
     if (age === retirementAge) events.push('Retirement');
-    const flow = annualCashflow({ age, currentAge, retirementAge, incomes, expenses, taxRate });
+    const projectionYear = currentYear + (age - currentAge);
+    const flow = annualCashflow({ age, currentAge, retirementAge, incomes, expenses, taxRate, currentYear });
+    const contributionSummary = annualContributionSummary(contributions, projectionYear, currentYear);
     const totals = categories(accounts, liabilities, cashDeficit.value);
     timeline.push({
       age,
@@ -230,9 +263,12 @@ export function projectHouseholdNetWorth(input) {
       otherAssets: round(totals.otherAssets),
       debts: round(-totals.debtBalance),
       netWorth: round(totals.netWorth),
-      annualInflow: round(flow.afterTaxIncome),
+      annualInflow: round(flow.afterTaxIncome + contributionSummary.external),
       annualOutflow: round(flow.outflow),
-      annualNetCashFlow: round(flow.net),
+      annualNetCashFlow: round(flow.net + contributionSummary.external),
+      annualContributions: round(contributionSummary.total),
+      annualExternalContributions: round(contributionSummary.external),
+      annualTransfers: round(contributionSummary.transfers),
       events
     });
     if (age === endAge) break;
@@ -243,18 +279,21 @@ export function projectHouseholdNetWorth(input) {
 
     if (detailedCashflow) {
       for (const income of incomes) {
-        const value = incomeAtAge(income, age, currentAge, retirementAge);
+        const value = incomeAtAge(income, age, currentAge, retirementAge, currentYear);
         const afterTax = value.nonTaxable + value.taxable * (1 - taxRate);
         applyFlow(accounts, income.deposit_account_id, afterTax, cashDeficit);
       }
       for (const expense of expenses) {
-        const amount = expenseAtAge(expense, age, currentAge, retirementAge);
-        applyFlow(accounts, expense.payment_account_id, -amount, cashDeficit);
+        const amount = expenseAtAge(expense, age, currentAge, retirementAge, currentYear);
+        applyFlow(accounts, expense.payment_account_id, -amount, cashDeficit, {
+          linkedOnly: expense.funding_policy === 'linked_only'
+        });
       }
     } else if (age < retirementAge) {
       applyFlow(accounts, null, annualContribution, cashDeficit);
     }
 
+    applyContributionSchedules(accounts, contributions, projectionYear, currentYear, cashDeficit);
     updateLiabilities(liabilities);
   }
 
@@ -269,6 +308,8 @@ export function projectHouseholdNetWorth(input) {
     atLongevity: longevityPoint,
     assumptions: [
       'Income is added to its linked account after the effective tax-rate assumption; expenses are withdrawn from their linked account.',
+      'Scheduled account contributions compound inside their target account. Transfers between owned accounts do not increase total net worth; external and employer contributions do.',
+      'Future expenses can use actual start and end dates. Linked-only expenses draw from the selected account first and surface any remaining amount as a funding deficit.',
       'Unlinked cash flows use the first cash account, then other liquid investment accounts.',
       'Investment accounts use their saved profile or latest holdings-based forecast return. Real estate uses its saved property-growth rate.',
       'Loan balances amortize using principal-and-interest payments. Escrow, insurance, tax, and HOA amounts affect cash flow but do not reduce principal.',

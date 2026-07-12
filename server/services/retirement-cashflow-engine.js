@@ -45,18 +45,49 @@ export function annualize(amount, frequency = 'annual') {
   return value * (multipliers[frequency] || 1);
 }
 
-function isActive(item, age) {
+function dateYear(value) {
+  if (!value) return null;
+  const date = value instanceof Date
+    ? value
+    : new Date(`${String(value).slice(0, 10)}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) ? date.getUTCFullYear() : null;
+}
+
+function isActive(item, age, currentAge, currentYear = new Date().getUTCFullYear()) {
   const startAge = item.start_age == null ? null : asNumber(item.start_age);
   const endAge = item.end_age == null ? null : asNumber(item.end_age);
-  return (startAge == null || age >= startAge) && (endAge == null || age <= endAge);
+  const projectionYear = currentYear + (age - currentAge);
+  const startYear = dateYear(item.start_date);
+  const endYear = dateYear(item.end_date);
+  const ageActive = (startAge == null || age >= startAge) && (endAge == null || age <= endAge);
+  const dateActive = (startYear == null || projectionYear >= startYear)
+    && (endYear == null || projectionYear <= endYear);
+  return ageActive && dateActive;
 }
 
 function inflate(amount, rate, years) {
   return amount * ((1 + asNumber(rate)) ** Math.max(0, years));
 }
 
-export function incomeAtAge(item, age, currentAge, retirementAge) {
-  if (!isActive(item, age)) return { gross: 0, taxable: 0, nonTaxable: 0 };
+
+function scheduledExternalContribution(contributions, age, currentAge, currentYear = new Date().getUTCFullYear()) {
+  const projectionYear = currentYear + (age - currentAge);
+  const investableTargets = new Set(['cash', 'brokerage', 'ira', '401k', 'retirement', 'hsa']);
+  return (contributions || []).reduce((sum, item) => {
+    if (!['external', 'employer_match'].includes(item.contribution_type)) return sum;
+    if (!investableTargets.has(item.target_account_type)) return sum;
+    const startYear = dateYear(item.start_date);
+    const endYear = dateYear(item.end_date);
+    if (startYear != null && projectionYear < startYear) return sum;
+    if (endYear != null && projectionYear > endYear) return sum;
+    const base = annualize(item.amount, item.frequency);
+    const growthYears = Math.max(0, projectionYear - (startYear ?? currentYear));
+    return sum + base * ((1 + asNumber(item.annual_increase_rate)) ** growthYears);
+  }, 0);
+}
+
+export function incomeAtAge(item, age, currentAge, retirementAge, currentYear = new Date().getUTCFullYear()) {
+  if (!isActive(item, age, currentAge, currentYear)) return { gross: 0, taxable: 0, nonTaxable: 0 };
   if (item.ends_at_retirement && age >= retirementAge) return { gross: 0, taxable: 0, nonTaxable: 0 };
   const gross = inflate(asNumber(item.annual_amount), item.inflation_rate, age - currentAge);
   return {
@@ -66,8 +97,8 @@ export function incomeAtAge(item, age, currentAge, retirementAge) {
   };
 }
 
-export function expenseAtAge(item, age, currentAge, retirementAge) {
-  if (!isActive(item, age)) return 0;
+export function expenseAtAge(item, age, currentAge, retirementAge, currentYear = new Date().getUTCFullYear()) {
+  if (!isActive(item, age, currentAge, currentYear)) return 0;
   const isRetired = age >= retirementAge;
   let amount = asNumber(item.annual_amount);
 
@@ -175,10 +206,12 @@ export function buildYearCashflow({
   taxRate,
   fallbackRetirementSpending,
   fallbackInflation,
-  hasDetailedExpenses
+  hasDetailedExpenses,
+  contributions = [],
+  currentYear = new Date().getUTCFullYear()
 }) {
   const income = incomes.reduce((total, item) => {
-    const result = incomeAtAge(item, age, currentAge, retirementAge);
+    const result = incomeAtAge(item, age, currentAge, retirementAge, currentYear);
     total.gross += result.gross;
     total.taxable += result.taxable;
     total.nonTaxable += result.nonTaxable;
@@ -186,12 +219,13 @@ export function buildYearCashflow({
   }, { gross: 0, taxable: 0, nonTaxable: 0 });
 
   const expensesAnnual = hasDetailedExpenses
-    ? expenses.reduce((sum, item) => sum + expenseAtAge(item, age, currentAge, retirementAge), 0)
+    ? expenses.reduce((sum, item) => sum + expenseAtAge(item, age, currentAge, retirementAge, currentYear), 0)
     : (age >= retirementAge
       ? inflate(fallbackRetirementSpending, fallbackInflation, age - retirementAge)
       : 0);
 
   const afterTaxIncome = income.nonTaxable + income.taxable * (1 - taxRate);
+  const scheduledContribution = scheduledExternalContribution(contributions, age, currentAge, currentYear);
   const netHouseholdCashFlow = afterTaxIncome - expensesAnnual;
   const hasDetailedCashflow = incomes.length > 0 || expenses.length > 0;
   const contribution = age < retirementAge
@@ -200,9 +234,9 @@ export function buildYearCashflow({
   const portfolioWithdrawal = netHouseholdCashFlow < 0
     ? Math.abs(netHouseholdCashFlow) / Math.max(0.01, 1 - taxRate)
     : 0;
-  const portfolioInflow = age < retirementAge
+  const portfolioInflow = (age < retirementAge
     ? contribution
-    : Math.max(0, netHouseholdCashFlow);
+    : Math.max(0, netHouseholdCashFlow)) + scheduledContribution;
 
   return {
     incomeGross: income.gross,
@@ -211,7 +245,8 @@ export function buildYearCashflow({
     contribution,
     portfolioWithdrawal,
     portfolioInflow,
-    netCashFlow: netHouseholdCashFlow
+    netCashFlow: netHouseholdCashFlow,
+    scheduledContribution
   };
 }
 
@@ -226,6 +261,8 @@ function simulateCandidate(input, retirementAge, simulationCount, seed) {
   const incomes = input.incomes || [];
   const expenses = input.expenses || [];
   const properties = input.properties || [];
+  const contributions = input.contributions || [];
+  const currentYear = Math.floor(asNumber(input.currentYear, new Date().getUTCFullYear()));
   const hasDetailedExpenses = expenses.length > 0;
   const fallbackRetirementSpending = Math.max(0, asNumber(input.annualRetirementSpending));
   const fallbackInflation = asNumber(input.inflation, 0.025);
@@ -246,7 +283,9 @@ function simulateCandidate(input, retirementAge, simulationCount, seed) {
       taxRate,
       fallbackRetirementSpending,
       fallbackInflation,
-      hasDetailedExpenses
+      hasDetailedExpenses,
+      contributions,
+      currentYear
     });
     const homeRelease = homeReleaseAtAge(properties, age, currentAge, retirementAge);
     deterministic.push(round(Math.max(0, deterministicBalance)));
@@ -257,6 +296,7 @@ function simulateCandidate(input, retirementAge, simulationCount, seed) {
       monthlyContribution: round(cashflow.contribution / 12),
       monthlyPortfolioWithdrawal: round(cashflow.portfolioWithdrawal / 12),
       monthlyNetCashFlow: round(cashflow.netCashFlow / 12),
+      monthlyScheduledContribution: round(cashflow.scheduledContribution / 12),
       homeEquityRelease: round(homeRelease)
     });
     deterministicBalance = deterministicBalance * (1 + expectedReturn)
@@ -285,7 +325,9 @@ function simulateCandidate(input, retirementAge, simulationCount, seed) {
         taxRate,
         fallbackRetirementSpending,
         fallbackInflation,
-        hasDetailedExpenses
+        hasDetailedExpenses,
+        contributions,
+        currentYear
       });
       const annualReturn = Math.max(-0.95, expectedReturn + volatility * normalRandom(random));
       balance = balance * (1 + annualReturn)
@@ -374,11 +416,13 @@ export function evaluateRetirementPlan(input) {
       volatility: input.volatility,
       inflation: input.inflation,
       effectiveTaxRate: input.effectiveTaxRate,
-      simulationCount
+      simulationCount,
+      scheduledContributionCount: (input.contributions || []).length
     },
     assumptions: [
       'Primary-residence value is included in net worth but excluded from retirement funding unless a cash-release scenario is explicitly entered.',
       'Detailed income and expense rows directly drive annual savings and withdrawals. Linked account selections determine where those cash flows appear in net-worth projections.',
+      'External and employer contribution schedules to retirement-capable accounts are added to portfolio inflows. Transfers between owned accounts are net-worth neutral.',
       'Portfolio returns are modeled using the balance-weighted expected return and volatility of investable accounts.',
       'Taxes are approximated using the effective tax rate. Detailed federal, state, Social Security, Medicare, and RMD tax rules are not yet modeled.',
       'Monte Carlo results are hypothetical and are not guarantees.'
