@@ -4,6 +4,7 @@
   const charts = {};
   let planning = { incomes: [], expenses: [], accounts: [], metrics: {} };
   let netWorthProjection = null;
+  let latestRetirementProjection = null;
   let editingIncomeId = null;
   let editingExpenseId = null;
   let editingContributionId = null;
@@ -435,6 +436,7 @@
     const projection = state?.projection;
     const summary = state?.summary;
     if (!projection || !summary) return;
+    latestRetirementProjection = projection;
 
     q('#earliestFeasibleAge').textContent = projection.earliestFeasibleAge ?? 'Not reached';
     q('#earliestFeasibleCopy').textContent = projection.earliestFeasibleAge == null
@@ -464,6 +466,11 @@
     if (typeof Chart !== 'undefined' && projection.cashflowTimeline?.length) {
       const colors = chartColors();
       const labels = projection.cashflowTimeline.map((row) => row.age);
+      const exclude529 = q('#exclude529Expenses')?.checked !== false;
+      const cashflowExpenseSeries = projection.cashflowTimeline.map((row) =>
+        Number(row.monthlyExpenses || 0) +
+        (exclude529 ? 0 : Number(row.monthly529Expenses || 0))
+      );
       destroyChart('retirementCashflow');
       charts.retirementCashflow = new Chart(q('#retirementCashflowChart'), {
         type: 'line',
@@ -494,7 +501,7 @@
           labels,
           datasets: [
             { label: 'Monthly income', data: projection.cashflowTimeline.map((row) => row.monthlyIncome), borderColor: colors.accent, backgroundColor: colors.accentPale, borderWidth: 3, pointRadius: 0, fill: false, tension: .25 },
-            { label: 'Monthly expenses', data: projection.cashflowTimeline.map((row) => row.monthlyExpenses), borderColor: colors.blueLight, backgroundColor: colors.blueLight, borderWidth: 3, pointRadius: 0, fill: false, tension: .25 }
+            { label: exclude529 ? 'Monthly expenses (excl. 529)' : 'Monthly expenses', data: cashflowExpenseSeries, borderColor: colors.blueLight, backgroundColor: colors.blueLight, borderWidth: 3, pointRadius: 0, fill: false, tension: .25 }
           ]
         },
         options: {
@@ -658,6 +665,53 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     q('#retirementBehavior').addEventListener('change', togglePostRetirementFields);
+
+    const exclude529Toggle = q('#exclude529Expenses');
+    const cashflowChartNote = q('#cashflowChartNote');
+
+    const update529ChartPreference = () => {
+      if (!exclude529Toggle) return;
+
+      const exclude529 = exclude529Toggle.checked;
+
+      try {
+        localStorage.setItem('nirvana.exclude529Cashflow', String(exclude529));
+      } catch {
+        // The chart still works when browser storage is unavailable.
+      }
+
+      if (cashflowChartNote) {
+        cashflowChartNote.textContent = exclude529
+          ? '529 withdrawals still reduce the 529 balance and projected net worth.'
+          : '529-funded expenses are included in the household expense line.';
+      }
+
+      if (!latestRetirementProjection || !charts.cashflow) return;
+
+      charts.cashflow.data.datasets[1].data =
+        latestRetirementProjection.cashflowTimeline.map((row) =>
+          Number(row.monthlyExpenses || 0) +
+          (exclude529 ? 0 : Number(row.monthly529Expenses || 0))
+        );
+
+      charts.cashflow.data.datasets[1].label = exclude529
+        ? 'Monthly expenses (excl. 529)'
+        : 'Monthly expenses';
+
+      charts.cashflow.update();
+    };
+
+    if (exclude529Toggle) {
+      try {
+        exclude529Toggle.checked =
+          localStorage.getItem('nirvana.exclude529Cashflow') !== 'false';
+      } catch {
+        exclude529Toggle.checked = true;
+      }
+
+      exclude529Toggle.addEventListener('change', update529ChartPreference);
+      update529ChartPreference();
+    }
     q('#incomeCancelEdit').addEventListener('click', resetIncomeForm);
     q('#expenseCancelEdit').addEventListener('click', resetExpenseForm);
     q('#contributionCancelEdit').addEventListener('click', resetContributionForm);

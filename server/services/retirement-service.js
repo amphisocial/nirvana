@@ -1,5 +1,5 @@
 import { pool } from '../db.js';
-import { evaluateRetirementPlan, summarizeInvestableAccounts } from './retirement-cashflow-engine.js';
+import { evaluateRetirementPlan, expenseAtAge, summarizeInvestableAccounts } from './retirement-cashflow-engine.js';
 import { estimatedPayoffAge, mortgagePaymentBreakdown } from './loan-schedule.js';
 
 function derivedExpense(row, overrides) {
@@ -216,6 +216,32 @@ export async function calculateRetirementProjection(householdId, options = {}) {
     properties,
     simulationCount: options.simulationCount || 1000,
     searchSimulationCount: options.searchSimulationCount || 350
+  });
+
+  const currentYear = new Date().getUTCFullYear();
+  const currentAge = Number(plan.current_age || 45);
+  const selectedRetirementAge = Number(plan.retirement_age || 65);
+
+  projection.cashflowTimeline = (projection.cashflowTimeline || []).map((row) => {
+    const annual529Expenses = designatedExpenses.reduce(
+      (sum, item) => sum + expenseAtAge(
+        item,
+        row.age,
+        currentAge,
+        selectedRetirementAge,
+        currentYear
+      ),
+      0
+    );
+
+    const monthly529Expenses = Math.round(
+      ((annual529Expenses / 12) + Number.EPSILON) * 100
+    ) / 100;
+
+    return {
+      ...row,
+      monthly529Expenses
+    };
   });
 
   projection.accountGrowthModel = {

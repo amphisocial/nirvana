@@ -696,3 +696,48 @@ body.sidebar-collapsed .mini-status { justify-content: center; padding-left: 0; 
     grid-template-columns: 1fr;
   }
 }
+
+
+/* 529 cash-flow chart filter - v0.5.1 */
+.cashflow-chart-head {
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.cashflow-chart-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: .5rem .7rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--blue-pale);
+  color: var(--blue-dark);
+  font-size: .76rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.cashflow-chart-filter input {
+  width: auto;
+  margin: 0;
+  accent-color: var(--blue);
+}
+
+.chart-filter-note {
+  margin: -.35rem 0 .75rem;
+  color: var(--ink-soft);
+  font-size: .76rem;
+}
+
+@media (max-width: 760px) {
+  .cashflow-chart-head {
+    display: grid;
+  }
+
+  .cashflow-chart-filter {
+    justify-self: start;
+  }
+}

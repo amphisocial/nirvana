@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Nirvana financial planning dashboard">
   <title>Nirvana Dashboard</title>
-  <link rel="stylesheet" href="/styles.css?v=0.5.0">
+  <link rel="stylesheet" href="/styles.css?v=0.5.1">
 </head>
 <body class="app-body">
   <aside class="sidebar" id="appSidebar">
@@ -108,7 +108,24 @@
         <article class="metric-card"><span>Retirement monthly gap</span><strong id="retirementGapMetric">—</strong><small>Expenses minus non-portfolio income</small></article>
         <article class="metric-card"><span>Scheduled contributions</span><strong id="currentContributionMetric">—</strong><small>Monthly transfers and external deposits</small></article>
       </div>
-      <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">LIFETIME CASH FLOW</span><h2>Monthly income and expenses over time</h2></div></div><div class="chart-wrap chart-tall"><canvas id="cashflowChart"></canvas></div></article>
+      <article class="panel chart-panel">
+        <div class="panel-head cashflow-chart-head">
+          <div>
+            <span class="panel-kicker">LIFETIME CASH FLOW</span>
+            <h2>Monthly income and expenses over time</h2>
+          </div>
+          <label class="cashflow-chart-filter">
+            <input id="exclude529Expenses" type="checkbox" checked>
+            <span>Exclude 529-funded expenses</span>
+          </label>
+        </div>
+        <p id="cashflowChartNote" class="chart-filter-note">
+          529 withdrawals still reduce the 529 balance and projected net worth.
+        </p>
+        <div class="chart-wrap chart-tall">
+          <canvas id="cashflowChart"></canvas>
+        </div>
+      </article>
       <div class="dashboard-grid equal">
         <article class="panel form-panel"><div class="panel-head"><div><span class="panel-kicker">INCOME</span><h2 id="incomeFormTitle">Add income source</h2></div></div>
           <form id="incomeForm" class="stack-form">
@@ -307,7 +324,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
   <script src="/app.js?v=0.5.0" defer></script>
-  <script src="/planning-ui.js?v=0.5.0" defer></script>
+  <script src="/planning-ui.js?v=0.5.1" defer></script>
   <script src="/portfolio-ui.js?v=0.5.0" defer></script>
 </body>
 </html>
