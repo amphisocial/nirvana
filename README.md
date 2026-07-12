@@ -5,17 +5,21 @@ Nirvana is a personal finance and retirement-planning command center inspired by
 ## Phase 1 scope
 
 - Google sign-in and household profile
-- Manual account, liability, and holding entry
+- Manual account, liability, income, expense, and holding entry
 - CSV holding import as the backup to account aggregation
-- Net worth, asset allocation, concentration, and holdings dashboards
-- Retirement projection with deterministic and Monte Carlo views
+- Blue-and-white lifetime net-worth dashboard with stacked asset/debt bars and linked inflow, outflow, and net cash-flow trends
+- Retirement projection with deterministic and Monte Carlo views, account-linked cash flows, and feasible-retirement-age analysis
 - Stock trend charts for 3M, 6M, YTD, and 1Y
 - Evidence-driven Research AI that treats any ticker mention as a research request, builds a one-year data packet, calculates trend/risk metrics, retrieves recent news, and produces a default chart
 - Server-side Markdown skills and intent-based skill-agent routing
+- Brokerage and IRA holdings workbench with saved market-history Monte Carlo account forecasts
+- Loan and mortgage term, payoff, payment, escrow, insurance, PMI, and HOA modeling
 - Portfolio buy/sell what-if scenarios without trade execution
 - Stripe-ready subscription hooks
 - Plaid-ready schema and feature flags, disabled by default
 - PM2 service named `nirvana`
+
+The desktop application includes a collapsible navigation rail and a persistent Nirvana AI planner.
 
 ## Product boundary
 
@@ -74,3 +78,4 @@ Before public launch: obtain legal review of investment-advice positioning, add 
 - `docs/PLAID_PHASE2.md` — production Plaid architecture and security requirements
 - `docs/DEPLOYMENT_EXISTING_NGINX.md` — exact deployment for the existing AthenaBot Nginx/PM2/PostgreSQL/Certbot server
 - `docs/BUILD_VALIDATION.md` — tests and smoke checks completed
+- `docs/NIRVANA_0.4.0.md` — blue dashboard, loan schedules, linked cash flows, and holdings forecasts

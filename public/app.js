@@ -62,7 +62,10 @@ function chartDefaults() {
     accent: style.getPropertyValue('--accent').trim(),
     accentPale: style.getPropertyValue('--accent-pale').trim(),
     sand: style.getPropertyValue('--sand').trim(),
-    line: style.getPropertyValue('--line').trim()
+    line: style.getPropertyValue('--line').trim(),
+    blueDark: style.getPropertyValue('--blue-dark').trim() || '#0b3a67',
+    blue: style.getPropertyValue('--blue').trim() || '#1976c5',
+    blueLight: style.getPropertyValue('--blue-light').trim() || '#83b9ed'
   };
 }
 
@@ -103,27 +106,8 @@ function renderOverview() {
 
   if (typeof Chart !== 'undefined') {
     const colors = chartDefaults();
-    destroyChart('netWorth');
-    state.charts.netWorth = new Chart($('#netWorthChart'), {
-      type: 'line',
-      data: {
-        labels: netWorthHistory.map((row) => row.snapshot_date),
-        datasets: [{
-          label: 'Net worth',
-          data: netWorthHistory.map((row) => row.net_worth),
-          borderColor: colors.accent,
-          backgroundColor: colors.accentPale,
-          borderWidth: 3,
-          fill: true,
-          tension: .35,
-          pointRadius: 0,
-          pointHoverRadius: 4
-        }]
-      },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: standardScales(true) }
-    });
 
-    const palette = [colors.accent, colors.sand, colors.ink, '#82988c', '#c5a6a0', '#aeb8c1', '#787166'];
+    const palette = [colors.blue, colors.blueLight, colors.blueDark, '#4f97d1', '#a9cce8', '#769fca', '#c8dcef'];
     destroyChart('allocation');
     state.charts.allocation = new Chart($('#allocationChart'), {
       type: 'doughnut',
@@ -155,6 +139,9 @@ function populateRetirementForm() {
   form.expectedReturnPct.value = Number(plan.expected_return) * 100;
   form.volatilityPct.value = Number(plan.volatility) * 100;
   form.inflationPct.value = Number(plan.inflation) * 100;
+  if (form.successThresholdPct) form.successThresholdPct.value = Number(plan.success_threshold ?? 0.90) * 100;
+  if (form.maxSearchAge) form.maxSearchAge.value = plan.max_search_age ?? 75;
+  if (form.effectiveTaxRatePct) form.effectiveTaxRatePct.value = Number(plan.effective_tax_rate ?? 0.15) * 100;
 }
 
 function renderProjection() {
@@ -211,20 +198,34 @@ function isRetirementType(type) {
   return ['ira', '401k', 'retirement'].includes(type);
 }
 
+function isInvestmentType(type) {
+  return ['brokerage', 'ira', '401k', 'retirement'].includes(type);
+}
+
 function refreshInvestmentProfile(resetValues = false) {
   const form = $('#accountForm');
   const type = form.accountType.value;
+  const isInvestment = isInvestmentType(type);
   const fields = $('#investmentProfileFields');
-  fields.classList.toggle('hidden', !isRetirementType(type));
-  if (!isRetirementType(type)) return;
+  fields.classList.toggle('hidden', !isInvestment);
+  $('#portfolioSetupPrompt').classList.toggle('hidden', !isInvestment || form.projectionMethod.value !== 'holdings_monte_carlo');
+  if (!isInvestment) return;
 
-  const style = form.investmentStyle.value || 'balanced';
-  const defaults = investmentDefaults[style];
+  if (resetValues) {
+    form.projectionMethod.value = ['brokerage', 'ira'].includes(type) ? 'holdings_monte_carlo' : 'profile';
+    form.investmentStyle.value = ['brokerage', 'ira'].includes(type) ? 'self_managed' : 'balanced';
+  }
+  const style = form.investmentStyle.value || (['brokerage', 'ira'].includes(type) ? 'self_managed' : 'balanced');
+  const defaults = investmentDefaults[style] || investmentDefaults.balanced;
   if (resetValues) {
     form.expectedReturnPct.value = defaults.expectedReturnPct;
     form.expectedVolatilityPct.value = defaults.expectedVolatilityPct;
   }
-  $('#investmentProfileHint').textContent = defaults.hint;
+  const holdingsMode = form.projectionMethod.value === 'holdings_monte_carlo';
+  $('#investmentProfileHint').textContent = holdingsMode
+    ? 'Add stocks and ETFs below, then calculate the forecast. These values are fallback assumptions until that calculation is saved.'
+    : defaults.hint;
+  $('#portfolioSetupPrompt').classList.toggle('hidden', !holdingsMode);
 }
 
 function refreshPropertyProfile(resetValues = false) {
@@ -250,6 +251,7 @@ function resetAccountEditor() {
   $('#accountFormTitle').textContent = 'Add an asset';
   $('#accountSubmitButton').textContent = 'Add account';
   $('#accountCancelEdit').classList.add('hidden');
+  form.projectionMethod.value = 'profile';
   form.investmentStyle.value = 'balanced';
   form.expectedReturnPct.value = '6.0';
   form.expectedVolatilityPct.value = '12.0';
@@ -269,6 +271,8 @@ function resetLiabilityEditor() {
   $('#liabilityFormTitle').textContent = 'Add a debt';
   $('#liabilitySubmitButton').textContent = 'Add liability';
   $('#liabilityCancelEdit').classList.add('hidden');
+  form.liabilityType.value = 'mortgage';
+  refreshLoanForm();
 }
 
 function editAccount(id) {
@@ -280,7 +284,8 @@ function editAccount(id) {
   form.institution.value = account.institution || '';
   form.accountType.value = account.account_type;
   form.currentBalance.value = account.current_balance ?? 0;
-  form.investmentStyle.value = account.investment_style || 'balanced';
+  form.projectionMethod.value = account.projection_method || (['brokerage', 'ira'].includes(account.account_type) ? 'holdings_monte_carlo' : 'profile');
+  form.investmentStyle.value = account.investment_style || (['brokerage', 'ira'].includes(account.account_type) ? 'self_managed' : 'balanced');
   form.expectedReturnPct.value = account.expected_return == null ? '6.0' : Number(account.expected_return) * 100;
   form.expectedVolatilityPct.value = account.expected_volatility == null ? '12.0' : Number(account.expected_volatility) * 100;
   form.isPrimaryResidence.checked = Boolean(account.is_primary_residence);
@@ -305,11 +310,29 @@ function editLiability(id) {
   form.name.value = liability.name || '';
   form.institution.value = liability.institution || '';
   form.liabilityType.value = liability.liability_type;
+  form.originalAmount.value = liability.original_amount ?? '';
   form.currentBalance.value = liability.current_balance ?? 0;
   form.interestRatePct.value = liability.interest_rate == null ? '' : Number(liability.interest_rate) * 100;
+  form.originalTermMonths.value = liability.original_term_months ?? '';
+  form.loanStartDate.value = liability.loan_start_date ? String(liability.loan_start_date).slice(0, 10) : '';
+  form.currentTermMonth.value = liability.current_term_month ?? '';
+  if (liability.current_term_month != null) {
+    form.currentTermYear.value = Math.floor(Number(liability.current_term_month) / 12) + 1;
+    form.currentTermMonthInYear.value = (Number(liability.current_term_month) % 12) + 1;
+  } else {
+    form.currentTermYear.value = '';
+    form.currentTermMonthInYear.value = '';
+  }
+  form.principalInterestPayment.value = liability.principal_interest_payment ?? '';
+  form.propertyTaxPayment.value = liability.property_tax_payment ?? '';
+  form.homeInsurancePayment.value = liability.home_insurance_payment ?? '';
+  form.pmiPayment.value = liability.pmi_payment ?? '';
+  form.hoaPayment.value = liability.hoa_payment ?? '';
+  form.otherEscrowPayment.value = liability.other_escrow_payment ?? '';
   form.monthlyPayment.value = liability.monthly_payment ?? liability.minimum_payment ?? '';
   form.payoffAge.value = liability.payoff_age ?? '';
   form.linkedAccountId.value = liability.linked_account_id ?? '';
+  refreshLoanForm();
   $('#liabilityFormTitle').textContent = 'Edit liability';
   $('#liabilitySubmitButton').textContent = 'Save changes';
   $('#liabilityCancelEdit').classList.remove('hidden');
@@ -368,8 +391,9 @@ function renderAccounts() {
 
     const details = document.createElement('div');
     details.className = 'account-row-details';
+    const profileReturn = row.forecast_expected_return ?? row.expected_return;
     const profile = row.investment_style
-      ? ` · ${escapeHtml(row.investment_style.replaceAll('_', ' '))} · ${(Number(row.expected_return || 0) * 100).toFixed(1)}% modeled growth`
+      ? ` · ${escapeHtml((row.projection_method || 'profile').replaceAll('_', ' '))} · ${(Number(profileReturn || 0) * 100).toFixed(1)}% modeled growth${row.holding_count ? ` · ${row.holding_count} holdings` : ''}`
       : row.account_type === 'property'
         ? ` · ${row.is_primary_residence ? 'primary residence' : 'property'} · ${escapeHtml((row.retirement_treatment || 'keep').replaceAll('_', ' '))}`
         : '';
@@ -406,11 +430,86 @@ function renderAccounts() {
       }
     });
 
+    if (!row.debt && isInvestmentType(row.account_type)) {
+      const portfolioButton = document.createElement('button');
+      portfolioButton.type = 'button';
+      portfolioButton.className = 'row-action';
+      portfolioButton.textContent = 'Portfolio';
+      portfolioButton.addEventListener('click', () => {
+        switchView('accounts');
+        document.dispatchEvent(new CustomEvent('nirvana:open-portfolio', { detail: { accountId: row.id } }));
+      });
+      actions.append(portfolioButton);
+    }
     actions.append(editButton, deleteButton);
     trailing.append(balance, actions);
     item.append(details, trailing);
     list.append(item);
   });
+}
+
+
+function setSidebarCollapsed(collapsed) {
+  document.body.classList.toggle('sidebar-collapsed', collapsed);
+  const button = $('#sidebarToggle');
+  button.textContent = collapsed ? '›' : '‹';
+  button.setAttribute('aria-label', collapsed ? 'Expand navigation' : 'Collapse navigation');
+  button.title = collapsed ? 'Expand navigation' : 'Collapse navigation';
+  localStorage.setItem('nirvana.sidebarCollapsed', collapsed ? '1' : '0');
+  window.setTimeout(() => Object.values(state.charts).forEach((chart) => chart?.resize()), 260);
+}
+
+function numericFormValue(form, name) {
+  const value = form[name]?.value;
+  return value === '' || value == null ? null : Number(value);
+}
+
+function monthsElapsedFromDate(value) {
+  if (!value) return null;
+  const start = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(start.getTime())) return null;
+  const today = new Date();
+  return Math.max(0, (today.getFullYear() - start.getFullYear()) * 12 + today.getMonth() - start.getMonth());
+}
+
+function refreshLoanForm() {
+  const form = $('#liabilityForm');
+  if (!form) return;
+  const isMortgage = form.liabilityType.value === 'mortgage';
+  $('#mortgagePaymentFields').classList.toggle('hidden', !isMortgage);
+  const term = numericFormValue(form, 'originalTermMonths');
+  const currentYear = numericFormValue(form, 'currentTermYear');
+  const monthInYear = numericFormValue(form, 'currentTermMonthInYear');
+  let elapsed = currentYear == null
+    ? null
+    : Math.max(0, (Math.floor(currentYear) - 1) * 12 + Math.max(0, Math.floor((monthInYear || 1) - 1)));
+  if (elapsed == null) elapsed = monthsElapsedFromDate(form.loanStartDate.value);
+  form.currentTermMonth.value = elapsed == null ? '' : String(elapsed);
+  if (isMortgage) {
+    const components = ['principalInterestPayment','propertyTaxPayment','homeInsurancePayment','pmiPayment','hoaPayment','otherEscrowPayment'];
+    const componentTotal = components.reduce((sum, name) => sum + (numericFormValue(form, name) || 0), 0);
+    if (componentTotal > 0) form.monthlyPayment.value = componentTotal.toFixed(2);
+  }
+  const summary = $('#loanTermSummary');
+  if (!term) {
+    summary.textContent = 'Enter the original term and start date or current loan year and month to calculate the remaining term.';
+    return;
+  }
+  const used = Math.min(term, Math.max(0, elapsed || 0));
+  const remaining = Math.max(0, term - used);
+  const year = Math.floor(used / 12) + 1;
+  const month = (used % 12) + 1;
+  summary.textContent = `You are approximately in year ${year}, month ${month}. ${remaining} months (${(remaining / 12).toFixed(1)} years) remain on the original ${term}-month term.`;
+}
+
+function populateLinkedPropertySelect() {
+  const select = $('#linkedPropertySelect');
+  if (!select || !state.summary) return;
+  const selected = select.value;
+  select.replaceChildren(new Option('Not linked', ''));
+  state.summary.accounts.filter((account) => account.account_type === 'property')
+    .forEach((account) => select.add(new Option(account.name, account.id)));
+  select.value = selected;
 }
 
 function renderSettings() {
@@ -431,6 +530,7 @@ async function loadDashboard() {
   renderSettings();
   populateRetirementForm();
   renderProjection();
+  populateLinkedPropertySelect();
   await loadScenarioHistory();
   document.dispatchEvent(new CustomEvent('nirvana:data-loaded', { detail: state }));
 }
@@ -584,6 +684,8 @@ async function initialize() {
     showAlert(error.message);
   }
 
+  setSidebarCollapsed(localStorage.getItem('nirvana.sidebarCollapsed') === '1');
+  $('#sidebarToggle').addEventListener('click', () => setSidebarCollapsed(!document.body.classList.contains('sidebar-collapsed')));
   $$('.nav-item[data-view]').forEach((button) => button.addEventListener('click', () => switchView(button.dataset.view)));
   $$('[data-view-link]').forEach((button) => button.addEventListener('click', () => switchView(button.dataset.viewLink)));
   $('#refreshButton').addEventListener('click', async () => {
@@ -650,9 +752,10 @@ async function initialize() {
         institution: values.institution,
         accountType: values.accountType,
         currentBalance: values.currentBalance,
-        currency: 'USD'
+        currency: 'USD',
+        projectionMethod: isInvestmentType(values.accountType) ? values.projectionMethod : 'profile'
       };
-      if (isRetirementType(values.accountType)) {
+      if (isInvestmentType(values.accountType)) {
         payload.investmentStyle = values.investmentStyle;
         payload.expectedReturn = Number(values.expectedReturnPct) / 100;
         payload.expectedVolatility = Number(values.expectedVolatilityPct) / 100;
@@ -664,7 +767,7 @@ async function initialize() {
         payload.retirementCashRelease = values.retirementCashRelease || null;
         payload.propertyGrowthRate = Number(values.propertyGrowthRatePct || 3) / 100;
       }
-      await api(
+      const savedAccount = await api(
         editing ? `/api/accounts/${state.editingAccountId}` : '/api/accounts',
         {
           method: editing ? 'PUT' : 'POST',
@@ -673,7 +776,12 @@ async function initialize() {
       );
       resetAccountEditor();
       await loadDashboard();
-      showAlert(editing ? 'Asset updated.' : 'Asset added.');
+      if (savedAccount?.requiresPortfolioSetup || savedAccount?.projection_method === 'holdings_monte_carlo') {
+        document.dispatchEvent(new CustomEvent('nirvana:open-portfolio', { detail: { accountId: savedAccount.id } }));
+        showAlert('Account saved. Add its stocks or ETFs below, then calculate Monte Carlo growth.');
+      } else {
+        showAlert(editing ? 'Asset updated.' : 'Asset added.');
+      }
     } catch (error) { showAlert(error.message); } finally { button.disabled = false; }
   });
 
@@ -683,6 +791,7 @@ async function initialize() {
     refreshPropertyProfile(true);
   });
   $('#investmentStyle').addEventListener('change', () => refreshInvestmentProfile(true));
+  $('#projectionMethod').addEventListener('change', () => refreshInvestmentProfile(false));
   $('#retirementTreatment').addEventListener('change', () => refreshPropertyProfile(false));
 
   $('#liabilityForm').addEventListener('submit', async (event) => {
@@ -693,14 +802,27 @@ async function initialize() {
     try {
       const editing = Boolean(state.editingLiabilityId);
       const values = formObject(form);
-      const payload = { ...values };
-      delete payload.interestRatePct;
-      if (values.interestRatePct !== '') payload.interestRate = Number(values.interestRatePct) / 100;
-      else delete payload.interestRate;
-      payload.minimumPayment = values.monthlyPayment || null;
-      payload.monthlyPayment = values.monthlyPayment || null;
-      payload.payoffAge = values.payoffAge || null;
-      payload.linkedAccountId = values.linkedAccountId || null;
+      const payload = {
+        name: values.name,
+        institution: values.institution || null,
+        liabilityType: values.liabilityType,
+        originalAmount: values.originalAmount || null,
+        currentBalance: values.currentBalance,
+        interestRate: values.interestRatePct === '' ? null : Number(values.interestRatePct) / 100,
+        originalTermMonths: values.originalTermMonths || null,
+        loanStartDate: values.loanStartDate || null,
+        currentTermMonth: values.currentTermMonth || null,
+        principalInterestPayment: values.liabilityType === 'mortgage' ? (values.principalInterestPayment || null) : null,
+        propertyTaxPayment: values.liabilityType === 'mortgage' ? (values.propertyTaxPayment || null) : null,
+        homeInsurancePayment: values.liabilityType === 'mortgage' ? (values.homeInsurancePayment || null) : null,
+        pmiPayment: values.liabilityType === 'mortgage' ? (values.pmiPayment || null) : null,
+        hoaPayment: values.liabilityType === 'mortgage' ? (values.hoaPayment || null) : null,
+        otherEscrowPayment: values.liabilityType === 'mortgage' ? (values.otherEscrowPayment || null) : null,
+        minimumPayment: values.monthlyPayment || null,
+        monthlyPayment: values.monthlyPayment || null,
+        payoffAge: values.payoffAge || null,
+        linkedAccountId: values.linkedAccountId || null
+      };
 
       await api(
         editing ? `/api/accounts/liabilities/${state.editingLiabilityId}` : '/api/accounts/liabilities',
@@ -716,6 +838,9 @@ async function initialize() {
   });
 
   $('#liabilityCancelEdit').addEventListener('click', resetLiabilityEditor);
+  ['liabilityType','originalTermMonths','loanStartDate','currentTermYear','currentTermMonthInYear','principalInterestPayment','propertyTaxPayment','homeInsurancePayment','pmiPayment','hoaPayment','otherEscrowPayment']
+    .forEach((name) => $('#liabilityForm')[name]?.addEventListener('input', refreshLoanForm));
+  refreshLoanForm();
 
   $('#csvForm').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -768,6 +893,16 @@ async function initialize() {
 }
 
 window.nirvanaState = state;
+window.nirvanaApi = api;
+window.askNirvana = askNirvana;
+window.openNirvanaAssistant = (prompt = '') => {
+  $('#assistantDrawer').classList.add('open');
+  document.body.classList.add('assistant-open');
+  if (prompt) {
+    $('#assistantForm').message.value = prompt;
+    $('#assistantForm').message.focus();
+  }
+};
 window.loadNirvanaDashboard = loadDashboard;
 window.showNirvanaAlert = showAlert;
 document.addEventListener('DOMContentLoaded', initialize);

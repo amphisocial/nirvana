@@ -115,12 +115,16 @@ export function summarizeInvestableAccounts(accounts = [], plan = {}) {
   const normalized = rows.map((row) => {
     const balance = asNumber(row.current_balance);
     const defaults = accountDefaults(row.account_type);
-    const expectedReturn = row.expected_return == null
-      ? defaults.expectedReturn
-      : asNumber(row.expected_return, defaults.expectedReturn);
-    const volatility = row.expected_volatility == null
-      ? defaults.volatility
-      : asNumber(row.expected_volatility, defaults.volatility);
+    const expectedReturn = row.forecast_expected_return != null
+      ? asNumber(row.forecast_expected_return, defaults.expectedReturn)
+      : (row.expected_return == null
+        ? defaults.expectedReturn
+        : asNumber(row.expected_return, defaults.expectedReturn));
+    const volatility = row.forecast_volatility != null
+      ? asNumber(row.forecast_volatility, defaults.volatility)
+      : (row.expected_volatility == null
+        ? defaults.volatility
+        : asNumber(row.expected_volatility, defaults.volatility));
     weightedReturn += balance * expectedReturn;
     weightedVolatility += balance * volatility;
     return {
@@ -129,6 +133,8 @@ export function summarizeInvestableAccounts(accounts = [], plan = {}) {
       accountType: row.account_type,
       balance: round(balance),
       investmentStyle: row.investment_style || null,
+      projectionMethod: row.projection_method || 'profile',
+      forecastAsOf: row.forecast_as_of || null,
       expectedReturn,
       volatility
     };
@@ -159,7 +165,7 @@ function homeReleaseAtAge(properties, age, currentAge, retirementAge) {
   return total;
 }
 
-function buildYearCashflow({
+export function buildYearCashflow({
   age,
   currentAge,
   retirementAge,
@@ -186,15 +192,17 @@ function buildYearCashflow({
       : 0);
 
   const afterTaxIncome = income.nonTaxable + income.taxable * (1 - taxRate);
-  const contribution = age < retirementAge ? annualContribution : 0;
-  const householdCashFlow = afterTaxIncome - expensesAnnual - contribution;
-  const retirementCashFlow = afterTaxIncome - expensesAnnual;
-  const portfolioWithdrawal = age >= retirementAge && retirementCashFlow < 0
-    ? Math.abs(retirementCashFlow) / Math.max(0.01, 1 - taxRate)
+  const netHouseholdCashFlow = afterTaxIncome - expensesAnnual;
+  const hasDetailedCashflow = incomes.length > 0 || expenses.length > 0;
+  const contribution = age < retirementAge
+    ? (hasDetailedCashflow ? Math.max(0, netHouseholdCashFlow) : annualContribution)
+    : 0;
+  const portfolioWithdrawal = netHouseholdCashFlow < 0
+    ? Math.abs(netHouseholdCashFlow) / Math.max(0.01, 1 - taxRate)
     : 0;
   const portfolioInflow = age < retirementAge
     ? contribution
-    : Math.max(0, retirementCashFlow);
+    : Math.max(0, netHouseholdCashFlow);
 
   return {
     incomeGross: income.gross,
@@ -203,7 +211,7 @@ function buildYearCashflow({
     contribution,
     portfolioWithdrawal,
     portfolioInflow,
-    netCashFlow: householdCashFlow
+    netCashFlow: netHouseholdCashFlow
   };
 }
 
@@ -370,7 +378,7 @@ export function evaluateRetirementPlan(input) {
     },
     assumptions: [
       'Primary-residence value is included in net worth but excluded from retirement funding unless a cash-release scenario is explicitly entered.',
-      'Detailed income and expense rows drive cash flow. The plan-level retirement spending amount is used only when no expenses have been saved.',
+      'Detailed income and expense rows directly drive annual savings and withdrawals. Linked account selections determine where those cash flows appear in net-worth projections.',
       'Portfolio returns are modeled using the balance-weighted expected return and volatility of investable accounts.',
       'Taxes are approximated using the effective tax rate. Detailed federal, state, Social Security, Medicare, and RMD tax rules are not yet modeled.',
       'Monte Carlo results are hypothetical and are not guarantees.'

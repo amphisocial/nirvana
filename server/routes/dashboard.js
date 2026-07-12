@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { pool } from '../db.js';
+import { estimatedPayoffDate, loanTermPosition, mortgagePaymentBreakdown } from '../services/loan-schedule.js';
 
 export const dashboardRouter = Router();
 
@@ -10,27 +11,43 @@ dashboardRouter.get('/summary', async (req, res, next) => {
     const householdId = req.householdId;
     const [accountsResult, liabilitiesResult, holdingsResult, snapshotsResult, planResult] = await Promise.all([
       pool.query(`
-        SELECT id, name, institution, account_type,
-               current_balance::float8 AS current_balance,
-               investment_style,
-               expected_return::float8 AS expected_return,
-               expected_volatility::float8 AS expected_volatility,
-               is_primary_residence,
-               retirement_treatment,
-               retirement_treatment_age,
-               retirement_cash_release::float8 AS retirement_cash_release,
-               property_growth_rate::float8 AS property_growth_rate,
-               is_manual, last_verified_at
-        FROM accounts
-        WHERE household_id = $1
-        ORDER BY current_balance DESC`, [householdId]),
+        SELECT a.id, a.name, a.institution, a.account_type,
+               a.current_balance::float8 AS current_balance,
+               a.projection_method,
+               a.investment_style,
+               a.expected_return::float8 AS expected_return,
+               a.expected_volatility::float8 AS expected_volatility,
+               a.forecast_expected_return::float8 AS forecast_expected_return,
+               a.forecast_volatility::float8 AS forecast_volatility,
+               a.forecast_as_of, a.forecast_source,
+               a.is_primary_residence,
+               a.retirement_treatment,
+               a.retirement_treatment_age,
+               a.retirement_cash_release::float8 AS retirement_cash_release,
+               a.property_growth_rate::float8 AS property_growth_rate,
+               a.is_manual, a.last_verified_at,
+               COUNT(h.id)::int AS holding_count
+        FROM accounts a
+        LEFT JOIN holdings h ON h.account_id = a.id
+        WHERE a.household_id = $1
+        GROUP BY a.id
+        ORDER BY a.current_balance DESC`, [householdId]),
       pool.query(`
         SELECT id, name, institution, liability_type,
+               original_amount::float8 AS original_amount,
                current_balance::float8 AS current_balance,
                interest_rate::float8 AS interest_rate,
                minimum_payment::float8 AS minimum_payment,
                monthly_payment::float8 AS monthly_payment,
-               payoff_age, linked_account_id, last_verified_at
+               payoff_age, linked_account_id,
+               original_term_months, loan_start_date, current_term_month,
+               principal_interest_payment::float8 AS principal_interest_payment,
+               property_tax_payment::float8 AS property_tax_payment,
+               home_insurance_payment::float8 AS home_insurance_payment,
+               pmi_payment::float8 AS pmi_payment,
+               hoa_payment::float8 AS hoa_payment,
+               other_escrow_payment::float8 AS other_escrow_payment,
+               last_verified_at
         FROM liabilities
         WHERE household_id = $1
         ORDER BY current_balance DESC`, [householdId]),
@@ -58,7 +75,26 @@ dashboardRouter.get('/summary', async (req, res, next) => {
     ]);
 
     const accounts = accountsResult.rows;
-    const liabilities = liabilitiesResult.rows;
+    const currentAge = planResult.rows[0]?.current_age == null
+      ? null
+      : Number(planResult.rows[0].current_age);
+    const liabilities = liabilitiesResult.rows.map((row) => {
+      const term = loanTermPosition(row);
+      const breakdown = mortgagePaymentBreakdown(row);
+      return {
+        ...row,
+        term_elapsed_months: term.elapsedMonths,
+        term_current_year: term.currentYear,
+        term_current_month_in_year: term.currentMonthInYear,
+        remaining_term_months: term.remainingMonths,
+        estimated_payoff_date: estimatedPayoffDate(row),
+        computed_payoff_age: row.payoff_age
+          ?? (term.remainingMonths == null || currentAge == null
+            ? null
+            : Math.ceil(currentAge + term.remainingMonths / 12)),
+        payment_breakdown: breakdown
+      };
+    });
     const holdings = holdingsResult.rows;
     const assetsTotal = accounts.reduce((sum, row) => sum + Number(row.current_balance || 0), 0);
     const liabilitiesTotal = liabilities.reduce((sum, row) => sum + Number(row.current_balance || 0), 0);

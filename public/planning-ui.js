@@ -2,7 +2,8 @@
   const q = (selector, root = document) => root.querySelector(selector);
   const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
   const charts = {};
-  let planning = { incomes: [], expenses: [], metrics: {} };
+  let planning = { incomes: [], expenses: [], accounts: [], metrics: {} };
+  let netWorthProjection = null;
   let editingIncomeId = null;
   let editingExpenseId = null;
 
@@ -37,7 +38,12 @@
       accent: style.getPropertyValue('--accent').trim(),
       accentPale: style.getPropertyValue('--accent-pale').trim(),
       sand: style.getPropertyValue('--sand').trim(),
-      line: style.getPropertyValue('--line').trim()
+      line: style.getPropertyValue('--line').trim(),
+      blueDark: style.getPropertyValue('--blue-dark').trim() || '#0b3a67',
+      blue: style.getPropertyValue('--blue').trim() || '#1976c5',
+      blueLight: style.getPropertyValue('--blue-light').trim() || '#83b9ed',
+      bluePale: style.getPropertyValue('--blue-pale').trim() || '#dceeff',
+      slate: style.getPropertyValue('--blue-slate').trim() || '#486581'
     };
   }
 
@@ -66,6 +72,7 @@
     form.frequency.value = 'monthly';
     form.inflationRatePct.value = '0';
     form.taxable.checked = true;
+    form.depositAccountId.value = '';
     q('#incomeFormTitle').textContent = 'Add income source';
     q('#incomeSubmitButton').textContent = 'Add income';
     q('#incomeCancelEdit').classList.add('hidden');
@@ -79,6 +86,7 @@
     form.postRetirementFrequency.value = 'monthly';
     form.inflationRatePct.value = '2.5';
     form.essential.checked = true;
+    form.paymentAccountId.value = '';
     q('#expenseFormTitle').textContent = 'Add monthly expense';
     q('#expenseSubmitButton').textContent = 'Add expense';
     q('#expenseCancelEdit').classList.add('hidden');
@@ -99,6 +107,7 @@
     form.inflationRatePct.value = Number(item.inflation_rate || 0) * 100;
     form.taxable.checked = item.taxable !== false;
     form.endsAtRetirement.checked = Boolean(item.ends_at_retirement);
+    form.depositAccountId.value = item.deposit_account_id || '';
     form.notes.value = item.notes || '';
     q('#incomeFormTitle').textContent = 'Edit income source';
     q('#incomeSubmitButton').textContent = 'Save changes';
@@ -122,12 +131,36 @@
     form.endAge.value = item.end_age ?? '';
     form.inflationRatePct.value = Number(item.inflation_rate || 0) * 100;
     form.essential.checked = item.essential !== false;
+    form.paymentAccountId.value = item.payment_account_id || '';
     form.notes.value = item.notes || '';
     q('#expenseFormTitle').textContent = 'Edit expense';
     q('#expenseSubmitButton').textContent = 'Save changes';
     q('#expenseCancelEdit').classList.remove('hidden');
     togglePostRetirementFields();
     form.name.focus();
+  }
+
+
+  function linkedAccountName(id) {
+    if (!id) return 'default cash account';
+    return planning.accounts.find((account) => account.id === id)?.name || 'linked account';
+  }
+
+  function populateCashflowAccountSelects() {
+    const selects = [
+      [q('#incomeDepositAccountSelect'), 'Use default cash account'],
+      [q('#expensePaymentAccountSelect'), 'Use default cash account']
+    ];
+    for (const [select, placeholder] of selects) {
+      if (!select) continue;
+      const selected = select.value;
+      select.replaceChildren(new Option(placeholder, ''));
+      for (const account of planning.accounts || []) {
+        if (account.account_type === 'property' || account.account_type === 'other_asset') continue;
+        select.add(new Option(`${account.name} · ${String(account.account_type).replaceAll('_', ' ')}`, account.id));
+      }
+      select.value = selected;
+    }
   }
 
   function renderIncomeList() {
@@ -144,7 +177,7 @@
       const title = document.createElement('strong');
       title.textContent = item.name;
       const meta = document.createElement('small');
-      meta.textContent = `${String(item.income_type).replaceAll('_', ' ')} · ${item.ends_at_retirement ? 'ends at retirement' : 'continues by age range'}`;
+      meta.textContent = `${String(item.income_type).replaceAll('_', ' ')} · ${item.ends_at_retirement ? 'ends at retirement' : 'continues by age range'} · deposits to ${linkedAccountName(item.deposit_account_id)}`;
       details.append(title, meta);
       const trailing = document.createElement('div');
       trailing.className = 'cashflow-row-trailing';
@@ -184,7 +217,7 @@
       title.textContent = item.name;
       const meta = document.createElement('small');
       const end = item.end_age == null ? '' : ` · ends age ${item.end_age}`;
-      meta.textContent = `${String(item.category).replaceAll('_', ' ')} · ${retirementBehaviorLabel(item.retirement_behavior)}${end}`;
+      meta.textContent = `${String(item.category).replaceAll('_', ' ')} · ${retirementBehaviorLabel(item.retirement_behavior)}${end} · paid from ${linkedAccountName(item.payment_account_id)}`;
       details.append(title, meta);
       const trailing = document.createElement('div');
       trailing.className = 'cashflow-row-trailing';
@@ -284,8 +317,8 @@
           labels,
           datasets: [
             { label: 'After-tax income', data: projection.cashflowTimeline.map((row) => row.monthlyIncome), borderColor: colors.accent, backgroundColor: colors.accent, borderWidth: 2.5, pointRadius: 0, tension: .25 },
-            { label: 'Expenses', data: projection.cashflowTimeline.map((row) => row.monthlyExpenses), borderColor: colors.sand, backgroundColor: colors.sand, borderWidth: 2.5, pointRadius: 0, tension: .25 },
-            { label: 'Portfolio withdrawal', data: projection.cashflowTimeline.map((row) => row.monthlyPortfolioWithdrawal), borderColor: colors.ink, backgroundColor: colors.ink, borderDash: [5, 4], borderWidth: 2, pointRadius: 0, tension: .25 }
+            { label: 'Expenses', data: projection.cashflowTimeline.map((row) => row.monthlyExpenses), borderColor: colors.blueLight, backgroundColor: colors.blueLight, borderWidth: 2.5, pointRadius: 0, tension: .25 },
+            { label: 'Portfolio withdrawal', data: projection.cashflowTimeline.map((row) => row.monthlyPortfolioWithdrawal), borderColor: colors.blueDark, backgroundColor: colors.blueDark, borderDash: [5, 4], borderWidth: 2, pointRadius: 0, tension: .25 }
           ]
         },
         options: {
@@ -307,7 +340,7 @@
           labels,
           datasets: [
             { label: 'Monthly income', data: projection.cashflowTimeline.map((row) => row.monthlyIncome), borderColor: colors.accent, backgroundColor: colors.accentPale, borderWidth: 3, pointRadius: 0, fill: false, tension: .25 },
-            { label: 'Monthly expenses', data: projection.cashflowTimeline.map((row) => row.monthlyExpenses), borderColor: colors.sand, backgroundColor: colors.sand, borderWidth: 3, pointRadius: 0, fill: false, tension: .25 }
+            { label: 'Monthly expenses', data: projection.cashflowTimeline.map((row) => row.monthlyExpenses), borderColor: colors.blueLight, backgroundColor: colors.blueLight, borderWidth: 3, pointRadius: 0, fill: false, tension: .25 }
           ]
         },
         options: {
@@ -324,8 +357,73 @@
     }
   }
 
+
+  function renderProjectedNetWorth(projection) {
+    if (!projection?.timeline?.length) return;
+    netWorthProjection = projection;
+    const retirement = projection.atRetirement || projection.timeline[0];
+    const longevity = projection.atLongevity || projection.timeline.at(-1);
+    q('#projectionRetirementAge').textContent = `(${projection.retirementAge})`;
+    q('#projectionLongevityAge').textContent = `(${projection.longevityAge})`;
+    q('#projectedRetirementNetWorth').textContent = currency.format(retirement?.netWorth || 0);
+    q('#projectedLongevityNetWorth').textContent = currency.format(longevity?.netWorth || 0);
+    q('#projectedAnnualInflow').textContent = currency.format(projection.timeline[0]?.annualInflow || 0);
+    q('#projectedAnnualOutflow').textContent = currency.format(projection.timeline[0]?.annualOutflow || 0);
+    q('#projectedNetCashFlow').textContent = currency.format(projection.timeline[0]?.annualNetCashFlow || 0);
+    q('#projectionAssumptionNote').textContent = projection.assumptions?.[0]
+      || 'Income and expenses are deposited to or withdrawn from their linked accounts.';
+
+    if (typeof Chart === 'undefined') return;
+    const colors = chartColors();
+    const labels = projection.timeline.map((row) => row.year);
+    destroyChart('projectedNetWorth');
+    charts.projectedNetWorth = new Chart(q('#projectedNetWorthChart'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { type: 'bar', label: 'Savings & investments', data: projection.timeline.map((row) => row.savingsInvestments), backgroundColor: colors.blue, borderWidth: 0, stack: 'worth', yAxisID: 'yWorth' },
+          { type: 'bar', label: 'Real estate', data: projection.timeline.map((row) => row.realEstate), backgroundColor: colors.blueLight, borderWidth: 0, stack: 'worth', yAxisID: 'yWorth' },
+          { type: 'bar', label: 'Other assets', data: projection.timeline.map((row) => row.otherAssets), backgroundColor: colors.bluePale, borderWidth: 0, stack: 'worth', yAxisID: 'yWorth' },
+          { type: 'bar', label: 'Debts', data: projection.timeline.map((row) => row.debts), backgroundColor: colors.slate, borderWidth: 0, stack: 'worth', yAxisID: 'yWorth' },
+          { type: 'line', label: 'Net worth', data: projection.timeline.map((row) => row.netWorth), borderColor: colors.blueDark, backgroundColor: colors.blueDark, borderWidth: 3, pointRadius: (context) => projection.timeline[context.dataIndex]?.events?.length ? 4 : 0, pointHoverRadius: 5, tension: .25, yAxisID: 'yWorth' },
+          { type: 'line', label: 'Inflow', data: projection.timeline.map((row) => row.annualInflow), borderColor: '#3d8bd4', backgroundColor: '#3d8bd4', borderDash: [5, 3], borderWidth: 2, pointRadius: 0, tension: .2, yAxisID: 'yCash' },
+          { type: 'line', label: 'Outflow', data: projection.timeline.map((row) => -row.annualOutflow), borderColor: '#7aa6cf', backgroundColor: '#7aa6cf', borderDash: [2, 3], borderWidth: 2, pointRadius: 0, tension: .2, yAxisID: 'yCash' },
+          { type: 'line', label: 'Net cash flow', data: projection.timeline.map((row) => row.annualNetCashFlow), borderColor: '#183f66', backgroundColor: '#183f66', borderWidth: 2.5, pointRadius: 0, tension: .2, yAxisID: 'yCash' }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { intersect: false, mode: 'index' },
+        plugins: {
+          legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } },
+          tooltip: { callbacks: {
+            label: (context) => `${context.dataset.label}: ${currency.format(context.raw)}`,
+            afterBody: (items) => {
+              const index = items?.[0]?.dataIndex;
+              const events = projection.timeline[index]?.events || [];
+              return events.length ? [`Milestone: ${events.join(' · ')}`] : [];
+            }
+          } }
+        },
+        scales: {
+          x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 10 } },
+          yWorth: { stacked: true, position: 'left', grid: { color: colors.line }, ticks: { callback: (value) => currency.format(value) }, title: { display: true, text: 'Net worth' } },
+          yCash: { position: 'right', grid: { display: false }, ticks: { callback: (value) => currency.format(value) }, title: { display: true, text: 'Annual cash flow' } }
+        }
+      }
+    });
+  }
+
+  async function loadNetWorthProjection() {
+    const projection = await request('/api/planning/net-worth-projection');
+    renderProjectedNetWorth(projection);
+  }
+
   async function loadPlanningSummary() {
     planning = await request('/api/planning/summary');
+    populateCashflowAccountSelects();
     renderPlanningMetrics();
     renderIncomeList();
     renderExpenseList();
@@ -333,7 +431,7 @@
 
   async function refreshEverything() {
     if (window.loadNirvanaDashboard) await window.loadNirvanaDashboard();
-    await loadPlanningSummary();
+    await Promise.all([loadPlanningSummary(), loadNetWorthProjection()]);
   }
 
   function togglePostRetirementFields() {
@@ -352,6 +450,7 @@
       inflationRate: Number(form.inflationRatePct.value || 0) / 100,
       taxable: form.taxable.checked,
       endsAtRetirement: form.endsAtRetirement.checked,
+      depositAccountId: form.depositAccountId.value || null,
       notes: form.notes.value || null
     };
   }
@@ -369,13 +468,14 @@
       endAge: form.endAge.value || null,
       inflationRate: Number(form.inflationRatePct.value || 0) / 100,
       essential: form.essential.checked,
+      paymentAccountId: form.paymentAccountId.value || null,
       notes: form.notes.value || null
     };
   }
 
   document.addEventListener('nirvana:data-loaded', (event) => {
     renderRetirementEnhancements(event.detail);
-    loadPlanningSummary().catch((error) => alertUser(error.message));
+    Promise.all([loadPlanningSummary(), loadNetWorthProjection()]).catch((error) => alertUser(error.message));
   });
 
   document.addEventListener('DOMContentLoaded', () => {

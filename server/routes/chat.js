@@ -20,6 +20,8 @@ function buildHouseholdContext(accounts, liabilities, holdings, plan, incomes, e
     current_balance: Number(row.current_balance) || 0,
     expected_return: row.expected_return == null ? null : Number(row.expected_return),
     expected_volatility: row.expected_volatility == null ? null : Number(row.expected_volatility),
+    forecast_expected_return: row.forecast_expected_return == null ? null : Number(row.forecast_expected_return),
+    forecast_volatility: row.forecast_volatility == null ? null : Number(row.forecast_volatility),
     retirement_cash_release: row.retirement_cash_release == null ? null : Number(row.retirement_cash_release),
     property_growth_rate: row.property_growth_rate == null ? null : Number(row.property_growth_rate)
   }));
@@ -27,7 +29,12 @@ function buildHouseholdContext(accounts, liabilities, holdings, plan, incomes, e
     ...row,
     current_balance: Number(row.current_balance) || 0,
     interest_rate: row.interest_rate == null ? null : Number(row.interest_rate),
-    monthly_payment: row.monthly_payment == null ? null : Number(row.monthly_payment)
+    monthly_payment: row.monthly_payment == null ? null : Number(row.monthly_payment),
+    principal_interest_payment: row.principal_interest_payment == null ? null : Number(row.principal_interest_payment),
+    property_tax_payment: row.property_tax_payment == null ? null : Number(row.property_tax_payment),
+    home_insurance_payment: row.home_insurance_payment == null ? null : Number(row.home_insurance_payment),
+    pmi_payment: row.pmi_payment == null ? null : Number(row.pmi_payment),
+    hoa_payment: row.hoa_payment == null ? null : Number(row.hoa_payment)
   }));
   const holdingRows = holdings.map((row) => ({
     ...row,
@@ -133,8 +140,11 @@ async function getHouseholdContext(householdId) {
   const [accounts, liabilities, holdings, plan, incomes, expenses, projection] = await Promise.all([
     pool.query(
       `SELECT id, name, institution, account_type, current_balance::float8 AS current_balance,
-              investment_style, expected_return::float8 AS expected_return,
+              projection_method, investment_style, expected_return::float8 AS expected_return,
               expected_volatility::float8 AS expected_volatility,
+              forecast_expected_return::float8 AS forecast_expected_return,
+              forecast_volatility::float8 AS forecast_volatility,
+              forecast_as_of, forecast_source,
               is_primary_residence, retirement_treatment, retirement_treatment_age,
               retirement_cash_release::float8 AS retirement_cash_release,
               property_growth_rate::float8 AS property_growth_rate, last_verified_at
@@ -144,7 +154,15 @@ async function getHouseholdContext(householdId) {
     pool.query(
       `SELECT id, name, institution, liability_type, current_balance::float8 AS current_balance,
               interest_rate::float8 AS interest_rate, monthly_payment::float8 AS monthly_payment,
-              payoff_age, linked_account_id, last_verified_at
+              original_amount::float8 AS original_amount, original_term_months,
+              loan_start_date, current_term_month, payoff_age, linked_account_id,
+              principal_interest_payment::float8 AS principal_interest_payment,
+              property_tax_payment::float8 AS property_tax_payment,
+              home_insurance_payment::float8 AS home_insurance_payment,
+              pmi_payment::float8 AS pmi_payment,
+              hoa_payment::float8 AS hoa_payment,
+              other_escrow_payment::float8 AS other_escrow_payment,
+              last_verified_at
        FROM liabilities WHERE household_id = $1 ORDER BY current_balance DESC`,
       [householdId]
     ),
