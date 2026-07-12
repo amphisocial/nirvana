@@ -401,42 +401,39 @@ async function initialize() {
 
   $('#accountForm').addEventListener('submit', async (event) => {
     event.preventDefault();
-    const form = event.currentTarget;
     const button = event.submitter;
     button.disabled = true;
     try {
-      await api('/api/accounts', { method: 'POST', body: JSON.stringify(formObject(form)) });
-      form.reset();
+      await api('/api/accounts', { method: 'POST', body: JSON.stringify(formObject(event.currentTarget)) });
+      event.currentTarget.reset();
       await loadDashboard();
     } catch (error) { showAlert(error.message); } finally { button.disabled = false; }
   });
 
   $('#liabilityForm').addEventListener('submit', async (event) => {
     event.preventDefault();
-    const form = event.currentTarget;
     const button = event.submitter;
     button.disabled = true;
     try {
-      const values = formObject(form);
+      const values = formObject(event.currentTarget);
       const payload = { ...values };
       delete payload.interestRatePct;
       if (values.interestRatePct) payload.interestRate = Number(values.interestRatePct) / 100;
       if (!payload.minimumPayment) delete payload.minimumPayment;
       await api('/api/accounts/liabilities', { method: 'POST', body: JSON.stringify(payload) });
-      form.reset();
+      event.currentTarget.reset();
       await loadDashboard();
     } catch (error) { showAlert(error.message); } finally { button.disabled = false; }
   });
 
   $('#csvForm').addEventListener('submit', async (event) => {
     event.preventDefault();
-    const form = event.currentTarget;
     const button = event.submitter;
     button.disabled = true;
     try {
-      const result = await api('/api/accounts/holdings/import', { method: 'POST', body: new FormData(form) });
+      const result = await api('/api/accounts/holdings/import', { method: 'POST', body: new FormData(event.currentTarget) });
       showAlert(`Imported ${result.imported} holding${result.imported === 1 ? '' : 's'}.`);
-      form.reset();
+      event.currentTarget.reset();
       await loadDashboard();
     } catch (error) { showAlert(error.message); } finally { button.disabled = false; }
   });
