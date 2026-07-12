@@ -1,0 +1,3046 @@
+diff --git a/DEPLOY_RETIREMENT_CASHFLOW.md b/DEPLOY_RETIREMENT_CASHFLOW.md
+new file mode 100644
+index 0000000..7046457
+--- /dev/null
++++ b/DEPLOY_RETIREMENT_CASHFLOW.md
+@@ -0,0 +1,58 @@
++# Deploy Retirement Cash-Flow Planner
++
++Run all commands from the existing Nirvana application directory.
++
++## 1. Back up the current tracked files
++
++```bash
++cd /opt/apps/nirvana
++git status
++git stash push -u -m "before retirement cashflow v1"
++```
++
++## 2. Apply the patch
++
++Copy `nirvana-retirement-cashflow-v1.patch` to `/tmp` on the server, then run:
++
++```bash
++cd /opt/apps/nirvana
++git pull --ff-only origin main
++git apply --check /tmp/nirvana-retirement-cashflow-v1.patch
++git apply /tmp/nirvana-retirement-cashflow-v1.patch
++```
++
++## 3. Validate and migrate
++
++```bash
++node --check server/index.js
++node --check server/routes/accounts.js
++node --check server/routes/planning.js
++node --check server/routes/retirement.js
++node --check server/services/retirement-cashflow-engine.js
++node --check public/app.js
++node --check public/planning-ui.js
++
++npm test
++npm run db:migrate
++```
++
++The migration runner now applies every numbered SQL file in `db/` and records it in `schema_migrations`. It will apply `002_retirement_account_profiles.sql` and `003_retirement_cashflow_planner.sql` automatically when needed.
++
++## 4. Restart only Nirvana
++
++```bash
++pm2 restart nirvana --update-env
++pm2 save
++pm2 logs nirvana --lines 100
++```
++
++Hard-refresh Chrome with `Command + Shift + R`.
++
++## 5. Commit after validation
++
++```bash
++cd /opt/apps/nirvana
++git add .
++git commit -m "Add retirement cash-flow planning and feasible-age analysis"
++git push origin main
++```
+diff --git a/db/002_retirement_account_profiles.sql b/db/002_retirement_account_profiles.sql
+new file mode 100644
+index 0000000..3a6ea8e
+--- /dev/null
++++ b/db/002_retirement_account_profiles.sql
+@@ -0,0 +1,31 @@
++BEGIN;
++
++ALTER TABLE accounts DROP CONSTRAINT IF EXISTS accounts_account_type_check;
++ALTER TABLE accounts
++  ADD CONSTRAINT accounts_account_type_check
++  CHECK (account_type IN (
++    'cash', 'brokerage', 'ira', '401k', 'retirement',
++    'property', 'hsa', '529', 'other_asset'
++  ));
++
++ALTER TABLE accounts
++  ADD COLUMN IF NOT EXISTS investment_style TEXT,
++  ADD COLUMN IF NOT EXISTS expected_return NUMERIC(8,5),
++  ADD COLUMN IF NOT EXISTS expected_volatility NUMERIC(8,5);
++
++ALTER TABLE accounts DROP CONSTRAINT IF EXISTS accounts_investment_style_check;
++ALTER TABLE accounts
++  ADD CONSTRAINT accounts_investment_style_check
++  CHECK (
++    investment_style IS NULL OR investment_style IN (
++      'growth', 'balanced', 'conservative', 'self_managed'
++    )
++  );
++
++UPDATE accounts
++SET investment_style = COALESCE(investment_style, 'balanced'),
++    expected_return = COALESCE(expected_return, 0.06),
++    expected_volatility = COALESCE(expected_volatility, 0.12)
++WHERE account_type = 'retirement';
++
++COMMIT;
+diff --git a/db/003_retirement_cashflow_planner.sql b/db/003_retirement_cashflow_planner.sql
+new file mode 100644
+index 0000000..a946a5b
+--- /dev/null
++++ b/db/003_retirement_cashflow_planner.sql
+@@ -0,0 +1,99 @@
++BEGIN;
++
++ALTER TABLE accounts
++  ADD COLUMN IF NOT EXISTS is_primary_residence BOOLEAN NOT NULL DEFAULT false,
++  ADD COLUMN IF NOT EXISTS retirement_treatment TEXT NOT NULL DEFAULT 'keep',
++  ADD COLUMN IF NOT EXISTS retirement_treatment_age INTEGER,
++  ADD COLUMN IF NOT EXISTS retirement_cash_release NUMERIC(18,2),
++  ADD COLUMN IF NOT EXISTS property_growth_rate NUMERIC(8,5) NOT NULL DEFAULT 0.03;
++
++ALTER TABLE accounts DROP CONSTRAINT IF EXISTS accounts_retirement_treatment_check;
++ALTER TABLE accounts
++  ADD CONSTRAINT accounts_retirement_treatment_check
++  CHECK (retirement_treatment IN (
++    'keep', 'sell_at_retirement', 'sell_at_age', 'downsize',
++    'convert_to_rental', 'equity_access', 'undecided'
++  ));
++
++ALTER TABLE liabilities
++  ADD COLUMN IF NOT EXISTS linked_account_id UUID REFERENCES accounts(id) ON DELETE SET NULL,
++  ADD COLUMN IF NOT EXISTS monthly_payment NUMERIC(18,2),
++  ADD COLUMN IF NOT EXISTS payoff_age INTEGER;
++
++ALTER TABLE income_streams
++  ADD COLUMN IF NOT EXISTS income_type TEXT NOT NULL DEFAULT 'employment',
++  ADD COLUMN IF NOT EXISTS frequency TEXT NOT NULL DEFAULT 'annual',
++  ADD COLUMN IF NOT EXISTS start_age INTEGER,
++  ADD COLUMN IF NOT EXISTS end_age INTEGER,
++  ADD COLUMN IF NOT EXISTS inflation_rate NUMERIC(8,5) NOT NULL DEFAULT 0,
++  ADD COLUMN IF NOT EXISTS taxable BOOLEAN NOT NULL DEFAULT true,
++  ADD COLUMN IF NOT EXISTS ends_at_retirement BOOLEAN NOT NULL DEFAULT false,
++  ADD COLUMN IF NOT EXISTS notes TEXT,
++  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
++
++ALTER TABLE income_streams DROP CONSTRAINT IF EXISTS income_streams_type_check;
++ALTER TABLE income_streams
++  ADD CONSTRAINT income_streams_type_check
++  CHECK (income_type IN (
++    'employment', 'social_security', 'pension', 'annuity',
++    'rental', 'part_time', 'other'
++  ));
++
++ALTER TABLE income_streams DROP CONSTRAINT IF EXISTS income_streams_frequency_check;
++ALTER TABLE income_streams
++  ADD CONSTRAINT income_streams_frequency_check
++  CHECK (frequency IN ('weekly', 'biweekly', 'monthly', 'quarterly', 'annual'));
++
++ALTER TABLE expenses
++  ADD COLUMN IF NOT EXISTS frequency TEXT NOT NULL DEFAULT 'annual',
++  ADD COLUMN IF NOT EXISTS post_retirement_annual_amount NUMERIC(18,2),
++  ADD COLUMN IF NOT EXISTS post_retirement_frequency TEXT NOT NULL DEFAULT 'annual',
++  ADD COLUMN IF NOT EXISTS retirement_behavior TEXT NOT NULL DEFAULT 'same',
++  ADD COLUMN IF NOT EXISTS start_age INTEGER,
++  ADD COLUMN IF NOT EXISTS end_age INTEGER,
++  ADD COLUMN IF NOT EXISTS inflation_rate NUMERIC(8,5) NOT NULL DEFAULT 0.025,
++  ADD COLUMN IF NOT EXISTS essential BOOLEAN NOT NULL DEFAULT true,
++  ADD COLUMN IF NOT EXISTS linked_liability_id UUID REFERENCES liabilities(id) ON DELETE SET NULL,
++  ADD COLUMN IF NOT EXISTS notes TEXT,
++  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
++
++ALTER TABLE expenses DROP CONSTRAINT IF EXISTS expenses_frequency_check;
++ALTER TABLE expenses
++  ADD CONSTRAINT expenses_frequency_check
++  CHECK (frequency IN ('weekly', 'biweekly', 'monthly', 'quarterly', 'annual'));
++
++ALTER TABLE expenses DROP CONSTRAINT IF EXISTS expenses_post_frequency_check;
++ALTER TABLE expenses
++  ADD CONSTRAINT expenses_post_frequency_check
++  CHECK (post_retirement_frequency IN ('weekly', 'biweekly', 'monthly', 'quarterly', 'annual'));
++
++ALTER TABLE expenses DROP CONSTRAINT IF EXISTS expenses_retirement_behavior_check;
++ALTER TABLE expenses
++  ADD CONSTRAINT expenses_retirement_behavior_check
++  CHECK (retirement_behavior IN ('same', 'ends', 'custom', 'starts'));
++
++ALTER TABLE retirement_plans
++  ADD COLUMN IF NOT EXISTS success_threshold NUMERIC(8,5) NOT NULL DEFAULT 0.90,
++  ADD COLUMN IF NOT EXISTS max_search_age INTEGER NOT NULL DEFAULT 75,
++  ADD COLUMN IF NOT EXISTS effective_tax_rate NUMERIC(8,5) NOT NULL DEFAULT 0.15;
++
++UPDATE income_streams
++SET frequency = 'annual',
++    start_age = COALESCE(start_age, CASE WHEN start_year BETWEEN 0 AND 120 THEN start_year END),
++    end_age = COALESCE(end_age, CASE WHEN end_year BETWEEN 0 AND 120 THEN end_year END),
++    inflation_rate = CASE WHEN inflation_adjusted THEN 0.025 ELSE 0 END
++WHERE frequency IS NULL OR start_age IS NULL OR end_age IS NULL;
++
++UPDATE expenses
++SET frequency = 'annual',
++    post_retirement_frequency = 'annual',
++    start_age = COALESCE(start_age, CASE WHEN start_year BETWEEN 0 AND 120 THEN start_year END),
++    end_age = COALESCE(end_age, CASE WHEN end_year BETWEEN 0 AND 120 THEN end_year END),
++    inflation_rate = CASE WHEN inflation_adjusted THEN 0.025 ELSE 0 END
++WHERE frequency IS NULL OR post_retirement_frequency IS NULL;
++
++CREATE INDEX IF NOT EXISTS idx_income_streams_household ON income_streams(household_id);
++CREATE INDEX IF NOT EXISTS idx_expenses_household ON expenses(household_id);
++CREATE INDEX IF NOT EXISTS idx_accounts_primary_residence ON accounts(household_id, is_primary_residence);
++
++COMMIT;
+diff --git a/docs/RETIREMENT_CASHFLOW_V1.md b/docs/RETIREMENT_CASHFLOW_V1.md
+new file mode 100644
+index 0000000..305cdf0
+--- /dev/null
++++ b/docs/RETIREMENT_CASHFLOW_V1.md
+@@ -0,0 +1,43 @@
++# Retirement Cash-Flow Planner v1
++
++## Financial model
++
++Nirvana now separates three concepts:
++
++1. **Net worth**: all assets minus all liabilities.
++2. **Investable assets**: cash, brokerage, IRA, 401(k), retirement, and HSA balances. Education-designated 529 assets remain in net worth but are excluded from retirement funding.
++3. **Retirement funding**: investable assets plus modeled income and explicit home-equity releases, less expenses, taxes, and portfolio withdrawals.
++
++A primary residence contributes to net worth but is excluded from retirement funding when its treatment is `keep`, `convert_to_rental`, or `undecided`.
++
++## Income and expense planning
++
++The new Income & Expenses workspace supports recurring income and expenses with:
++
++- weekly, biweekly, monthly, quarterly, or annual frequency
++- start and end ages
++- inflation or COLA assumptions
++- taxable versus non-taxable income
++- employment income that ends at retirement
++- expenses that continue, end, start, or change at retirement
++- essential versus discretionary designation
++
++A liability with a monthly payment and payoff age is automatically converted into a retirement cash-flow expense. The mortgage balance remains part of net-worth math; the payment belongs in cash-flow math.
++
++## Retirement engine
++
++For every candidate retirement age, the engine:
++
++- projects investable accounts using balance-weighted return and volatility assumptions
++- stops annual contributions at retirement
++- applies saved income and expense timelines
++- uses an effective tax-rate approximation
++- adds an explicit property cash release only when configured
++- performs seeded Monte Carlo simulations
++- compares success probability with the user's selected threshold
++
++The result includes an earliest feasible retirement age, selected-age success probability, monthly cash-flow timeline, and adjacent-age comparison.
++
++## Known limitations
++
++The current tax model is an effective-rate approximation. Detailed federal and state tax brackets, Social Security taxation, Medicare premiums, RMDs, account withdrawal sequencing, long-term care, and survivor scenarios remain future enhancements.
+diff --git a/package-lock.json b/package-lock.json
+index 4df85f7..3cbea06 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "nirvana-financial-planner",
+-  "version": "0.2.0",
++  "version": "0.3.0",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "nirvana-financial-planner",
+-      "version": "0.1.0",
++      "version": "0.3.0",
+       "dependencies": {
+         "connect-pg-simple": "^10.0.0",
+         "csv-parse": "^5.6.0",
+diff --git a/package.json b/package.json
+index 927d59e..2678769 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "nirvana-financial-planner",
+-  "version": "0.2.0",
++  "version": "0.3.0",
+   "private": true,
+   "type": "module",
+   "description": "Nirvana Phase 1 personal finance, retirement planning, portfolio research, and scenario analysis platform.",
+diff --git a/public/app.html b/public/app.html
+index 4cae774..88f0f34 100644
+--- a/public/app.html
++++ b/public/app.html
+@@ -5,7 +5,7 @@
+   <meta name="viewport" content="width=device-width, initial-scale=1">
+   <meta name="description" content="Nirvana financial planning dashboard">
+   <title>Nirvana Dashboard</title>
+-  <link rel="stylesheet" href="/styles.css">
++  <link rel="stylesheet" href="/styles.css?v=0.3.0">
+ </head>
+ <body class="app-body">
+   <aside class="sidebar">
+@@ -13,6 +13,7 @@
+     <nav class="side-nav" aria-label="Primary">
+       <button class="nav-item active" data-view="overview"><span>Overview</span></button>
+       <button class="nav-item" data-view="retirement"><span>Retirement</span></button>
++      <button class="nav-item" data-view="cashflow"><span>Income &amp; Expenses</span></button>
+       <button class="nav-item" data-view="scenario"><span>What-if Lab</span></button>
+       <button class="nav-item" data-view="research"><span>Research AI</span></button>
+       <button class="nav-item" data-view="accounts"><span>Accounts</span></button>
+@@ -26,17 +27,18 @@
+   <main class="app-main">
+     <header class="app-header">
+       <div><p class="eyebrow">FINANCIAL COMMAND CENTER</p><h1 id="pageTitle">Overview</h1></div>
+-      <div class="header-actions"><span id="userLabel" class="user-chip">Loading…</span><button id="refreshButton" class="icon-button" aria-label="Refresh dashboard">↻</button></div>
++      <div class="header-actions"><button id="assistantToggle" class="assistant-toggle" type="button">✦ Ask Nirvana</button><span id="userLabel" class="user-chip">Loading…</span><button id="refreshButton" class="icon-button" aria-label="Refresh dashboard">↻</button></div>
+     </header>
+ 
+     <div id="globalAlert" class="alert hidden" role="alert"></div>
+ 
+     <section id="overview" class="view active-view">
+-      <div class="metric-grid">
++      <div class="metric-grid metric-grid-five">
+         <article class="metric-card metric-featured"><span>Net worth</span><strong id="netWorthMetric">—</strong><small id="netWorthDelta">Assets minus liabilities</small></article>
+         <article class="metric-card"><span>Total assets</span><strong id="assetsMetric">—</strong><small id="accountCountMetric">— accounts</small></article>
+         <article class="metric-card"><span>Liabilities</span><strong id="liabilitiesMetric">—</strong><small>Tracked obligations</small></article>
+-        <article class="metric-card"><span>Investable portfolio</span><strong id="portfolioMetric">—</strong><small id="holdingsCountMetric">— holdings</small></article>
++        <article class="metric-card"><span>Investable assets</span><strong id="portfolioMetric">—</strong><small id="holdingsCountMetric">Excludes your primary home</small></article>
++        <article class="metric-card"><span>Home equity</span><strong id="homeEquityMetric">—</strong><small>Net worth, not retirement cash</small></article>
+       </div>
+       <div class="dashboard-grid two-one">
+         <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">TRAJECTORY</span><h2>Net worth over time</h2></div></div><div class="chart-wrap chart-tall"><canvas id="netWorthChart"></canvas></div></article>
+@@ -49,21 +51,73 @@
+     </section>
+ 
+     <section id="retirement" class="view">
++      <div class="metric-grid retirement-metric-grid">
++        <article class="metric-card metric-featured"><span>Earliest feasible retirement</span><strong id="earliestFeasibleAge">—</strong><small id="earliestFeasibleCopy">Based on your selected success threshold</small></article>
++        <article class="metric-card"><span>Selected-age success</span><strong id="selectedAgeSuccess">—</strong><small id="selectedAgeLabel">At your chosen retirement age</small></article>
++        <article class="metric-card"><span>Monthly expenses at retirement</span><strong id="retirementExpenseMetric">—</strong><small>From saved expense assumptions</small></article>
++        <article class="metric-card"><span>Home equity excluded</span><strong id="homeEquityRetirementMetric">—</strong><small>Unless you define a cash-release scenario</small></article>
++      </div>
+       <div class="dashboard-grid two-one">
+-        <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">MONTE CARLO</span><h2>Portfolio range by age</h2></div><span id="retirementStatus" class="status-pill neutral">—</span></div><div class="chart-wrap chart-extra-tall"><canvas id="retirementChart"></canvas></div><p class="chart-note">Shaded outcomes are represented by 10th, 50th, and 90th percentile paths from seeded simulations.</p></article>
++        <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">MONTE CARLO</span><h2>Investable portfolio range by age</h2></div><span id="retirementStatus" class="status-pill neutral">—</span></div><div class="chart-wrap chart-extra-tall"><canvas id="retirementChart"></canvas></div><p class="chart-note">Primary-residence value is excluded unless a sale, downsizing, or equity-release scenario is saved.</p></article>
+         <article class="panel form-panel"><div class="panel-head"><div><span class="panel-kicker">ASSUMPTIONS</span><h2>Plan inputs</h2></div></div>
+           <form id="retirementForm" class="stack-form">
+             <div class="form-row"><label>Current age<input name="currentAge" type="number" min="18" max="90" required></label><label>Retirement age<input name="retirementAge" type="number" min="19" max="95" required></label></div>
+-            <label>Plan through age<input name="planEndAge" type="number" min="50" max="120" required></label>
+-            <label>Annual contribution<input name="annualContribution" type="number" min="0" step="100" required></label>
+-            <label>Annual retirement spending<input name="annualRetirementSpending" type="number" min="0" step="100" required></label>
+-            <div class="form-row"><label>Expected return %<input name="expectedReturnPct" type="number" min="-50" max="50" step="0.1" required></label><label>Volatility %<input name="volatilityPct" type="number" min="0" max="100" step="0.1" required></label></div>
+-            <label>Inflation %<input name="inflationPct" type="number" min="-2" max="20" step="0.1" required></label>
++            <div class="form-row"><label>Plan through age<input name="planEndAge" type="number" min="50" max="120" required></label><label>Search retirement through age<input name="maxSearchAge" type="number" min="40" max="95" required></label></div>
++            <label>Annual contribution to investable accounts<input name="annualContribution" type="number" min="0" step="100" required></label>
++            <label>Fallback annual retirement spending<input name="annualRetirementSpending" type="number" min="0" step="100" required><small>Used only until detailed expenses are saved.</small></label>
++            <div class="form-row"><label>Fallback expected return %<input name="expectedReturnPct" type="number" min="-50" max="50" step="0.1" required></label><label>Fallback volatility %<input name="volatilityPct" type="number" min="0" max="100" step="0.1" required></label></div>
++            <div class="form-row"><label>General inflation %<input name="inflationPct" type="number" min="-2" max="20" step="0.1" required></label><label>Effective tax rate %<input name="effectiveTaxRatePct" type="number" min="0" max="60" step="0.1" required></label></div>
++            <label>Required success probability %<input name="successThresholdPct" type="number" min="50" max="99" step="1" required></label>
+             <button class="button button-primary" type="submit">Update projection</button>
+           </form>
+         </article>
+       </div>
+-      <article class="panel"><div class="panel-head"><div><span class="panel-kicker">MODEL LIMITS</span><h2>What Phase 1 includes</h2></div></div><div id="retirementAssumptions" class="assumption-grid"></div></article>
++      <div class="dashboard-grid two-one">
++        <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">MONTHLY CASH FLOW</span><h2>Income, expenses and withdrawals by age</h2></div></div><div class="chart-wrap chart-tall"><canvas id="retirementCashflowChart"></canvas></div></article>
++        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">AGE TRADEOFF</span><h2>Retirement-age comparison</h2></div></div><div class="table-wrap retirement-age-table"><table><thead><tr><th>Age</th><th>Success</th><th>Median at plan end</th></tr></thead><tbody id="retirementAgeTable"></tbody></table></div></article>
++      </div>
++      <article class="panel"><div class="panel-head"><div><span class="panel-kicker">MODEL ASSUMPTIONS</span><h2>What the projection is using</h2></div></div><div id="retirementAssumptions" class="assumption-grid"></div></article>
++    </section>
++
++    <section id="cashflow" class="view">
++      <div class="metric-grid">
++        <article class="metric-card metric-featured"><span>Current monthly income</span><strong id="currentIncomeMetric">—</strong><small>Before modeled taxes</small></article>
++        <article class="metric-card"><span>Current monthly expenses</span><strong id="currentExpenseMetric">—</strong><small>Saved recurring expenses</small></article>
++        <article class="metric-card"><span>Current monthly surplus</span><strong id="currentSurplusMetric">—</strong><small>Income minus expenses</small></article>
++        <article class="metric-card"><span>Retirement monthly gap</span><strong id="retirementGapMetric">—</strong><small>Expenses minus non-portfolio income</small></article>
++      </div>
++      <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">LIFETIME CASH FLOW</span><h2>Monthly income and expenses over time</h2></div></div><div class="chart-wrap chart-tall"><canvas id="cashflowChart"></canvas></div></article>
++      <div class="dashboard-grid equal">
++        <article class="panel form-panel"><div class="panel-head"><div><span class="panel-kicker">INCOME</span><h2 id="incomeFormTitle">Add income source</h2></div></div>
++          <form id="incomeForm" class="stack-form">
++            <label>Name<input name="name" required placeholder="Salary, Social Security, pension"></label>
++            <label>Type<select name="incomeType"><option value="employment">Employment</option><option value="social_security">Social Security</option><option value="pension">Pension</option><option value="annuity">Annuity</option><option value="rental">Rental income</option><option value="part_time">Part-time work</option><option value="other">Other</option></select></label>
++            <div class="form-row"><label>Amount<input name="amount" type="number" min="0" step="0.01" required></label><label>Frequency<select name="frequency"><option value="monthly">Monthly</option><option value="biweekly">Biweekly</option><option value="weekly">Weekly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select></label></div>
++            <div class="form-row"><label>Start age<input name="startAge" type="number" min="0" max="120"></label><label>End age<input name="endAge" type="number" min="0" max="120"></label></div>
++            <div class="form-row"><label>Annual growth / COLA %<input name="inflationRatePct" type="number" min="-10" max="20" step="0.1" value="0"></label><label class="check-label"><input name="taxable" type="checkbox" checked> Taxable income</label></div>
++            <label class="check-label"><input name="endsAtRetirement" type="checkbox"> Ends when I retire</label>
++            <label>Notes<textarea name="notes" rows="2"></textarea></label>
++            <div class="form-actions"><button id="incomeSubmitButton" class="button button-primary" type="submit">Add income</button><button id="incomeCancelEdit" class="button button-secondary hidden" type="button">Cancel edit</button></div>
++          </form>
++        </article>
++        <article class="panel form-panel"><div class="panel-head"><div><span class="panel-kicker">EXPENSE</span><h2 id="expenseFormTitle">Add monthly expense</h2></div></div>
++          <form id="expenseForm" class="stack-form">
++            <label>Name<input name="name" required placeholder="Mortgage, groceries, travel"></label>
++            <label>Category<select name="category"><option value="housing">Housing</option><option value="mortgage">Mortgage</option><option value="property_tax">Property tax</option><option value="home_insurance">Home insurance</option><option value="utilities">Utilities</option><option value="food">Food</option><option value="transportation">Transportation</option><option value="healthcare_premium">Healthcare premium</option><option value="healthcare_out_of_pocket">Healthcare out of pocket</option><option value="travel">Travel</option><option value="entertainment">Entertainment</option><option value="education">Education</option><option value="family_support">Family support</option><option value="insurance">Insurance</option><option value="debt_payment">Debt payment</option><option value="taxes">Taxes</option><option value="other">Other</option></select></label>
++            <div class="form-row"><label>Amount<input name="amount" type="number" min="0" step="0.01" required></label><label>Frequency<select name="frequency"><option value="monthly">Monthly</option><option value="weekly">Weekly</option><option value="biweekly">Biweekly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select></label></div>
++            <label>At retirement<select name="retirementBehavior" id="retirementBehavior"><option value="same">Continues at same amount</option><option value="ends">Ends at retirement</option><option value="custom">Changes to another amount</option><option value="starts">Starts at retirement</option></select></label>
++            <div id="postRetirementExpenseFields" class="form-row hidden"><label>Post-retirement amount<input name="postRetirementAmount" type="number" min="0" step="0.01"></label><label>Frequency<select name="postRetirementFrequency"><option value="monthly">Monthly</option><option value="weekly">Weekly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select></label></div>
++            <div class="form-row"><label>Start age<input name="startAge" type="number" min="0" max="120"></label><label>End / payoff age<input name="endAge" type="number" min="0" max="120"></label></div>
++            <div class="form-row"><label>Annual inflation %<input name="inflationRatePct" type="number" min="-10" max="20" step="0.1" value="2.5"></label><label class="check-label"><input name="essential" type="checkbox" checked> Essential expense</label></div>
++            <label>Notes<textarea name="notes" rows="2"></textarea></label>
++            <div class="form-actions"><button id="expenseSubmitButton" class="button button-primary" type="submit">Add expense</button><button id="expenseCancelEdit" class="button button-secondary hidden" type="button">Cancel edit</button></div>
++          </form>
++        </article>
++      </div>
++      <div class="dashboard-grid equal">
++        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">SAVED INCOME</span><h2>Income sources</h2></div></div><div id="incomeList" class="cashflow-list"></div></article>
++        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">SAVED EXPENSES</span><h2>Recurring expenses</h2></div></div><div id="expenseList" class="cashflow-list"></div></article>
++      </div>
+     </section>
+ 
+     <section id="scenario" class="view">
+@@ -97,8 +151,60 @@
+ 
+     <section id="accounts" class="view">
+       <div class="dashboard-grid equal">
+-        <article class="panel form-panel"><div class="panel-head"><div><span class="panel-kicker">MANUAL ACCOUNT</span><h2 id="accountFormTitle">Add an asset</h2></div></div><form id="accountForm" class="stack-form"><label>Account name<input name="name" required placeholder="Fidelity Brokerage"></label><label>Institution<input name="institution" placeholder="Optional"></label><label>Account type<select name="accountType"><option value="cash">Cash</option><option value="brokerage">Brokerage</option><option value="retirement">Retirement</option><option value="property">Property</option><option value="hsa">HSA</option><option value="529">529</option><option value="other_asset">Other asset</option></select></label><label>Current balance<input name="currentBalance" type="number" min="0" step="0.01" required></label><div class="form-actions"><button id="accountSubmitButton" class="button button-primary" type="submit">Add account</button><button id="accountCancelEdit" class="button button-secondary hidden" type="button">Cancel edit</button></div></form></article>
+-        <article class="panel form-panel"><div class="panel-head"><div><span class="panel-kicker">MANUAL LIABILITY</span><h2 id="liabilityFormTitle">Add a debt</h2></div></div><form id="liabilityForm" class="stack-form"><label>Liability name<input name="name" required placeholder="Home mortgage"></label><label>Institution<input name="institution" placeholder="Optional"></label><label>Type<select name="liabilityType"><option value="mortgage">Mortgage</option><option value="credit_card">Credit card</option><option value="student_loan">Student loan</option><option value="auto_loan">Auto loan</option><option value="personal_loan">Personal loan</option><option value="other">Other</option></select></label><div class="form-row"><label>Balance<input name="currentBalance" type="number" min="0" step="0.01" required></label><label>Rate %<input name="interestRatePct" type="number" min="0" max="100" step="0.01"></label></div><label>Minimum payment<input name="minimumPayment" type="number" min="0" step="0.01"></label><div class="form-actions"><button id="liabilitySubmitButton" class="button button-primary" type="submit">Add liability</button><button id="liabilityCancelEdit" class="button button-secondary hidden" type="button">Cancel edit</button></div></form></article>
++        <article class="panel form-panel retirement-account-form">
++          <div class="panel-head"><div><span class="panel-kicker">MANUAL ACCOUNT</span><h2 id="accountFormTitle">Add an asset</h2></div></div>
++          <form id="accountForm" class="stack-form">
++            <label>Account name<input name="name" required placeholder="Fidelity 401(k)"></label>
++            <label>Institution<input name="institution" placeholder="Optional"></label>
++            <label>Account type
++              <select name="accountType" id="accountType">
++                <option value="cash">Cash</option>
++                <option value="brokerage">Taxable brokerage</option>
++                <option value="ira">IRA / Roth IRA</option>
++                <option value="401k">401(k) / 403(b)</option>
++                <option value="property">Property</option>
++                <option value="hsa">HSA</option>
++                <option value="529">529 education</option>
++                <option value="other_asset">Other asset</option>
++              </select>
++            </label>
++            <div id="investmentProfileFields" class="investment-profile hidden">
++              <div class="profile-intro">
++                <strong>How is this retirement account invested?</strong>
++                <small>This assumption drives the account's projected year-over-year growth.</small>
++              </div>
++              <label>Investment approach
++                <select name="investmentStyle" id="investmentStyle">
++                  <option value="growth">Growth funds — modeled at 8.0%</option>
++                  <option value="balanced" selected>Balanced funds — modeled at 6.0%</option>
++                  <option value="conservative">Lower-risk funds — modeled at 4.0%</option>
++                  <option value="self_managed">Self-managed stocks — custom assumption</option>
++                </select>
++              </label>
++              <div class="form-row">
++                <label>Expected annual growth %
++                  <input name="expectedReturnPct" id="expectedReturnPct" type="number" min="-50" max="50" step="0.1" value="6.0">
++                </label>
++                <label>Expected volatility %
++                  <input name="expectedVolatilityPct" id="expectedVolatilityPct" type="number" min="0" max="100" step="0.1" value="12.0">
++                </label>
++              </div>
++              <p id="investmentProfileHint" class="mini-disclaimer">Balanced portfolio assumption. You can adjust it.</p>
++            </div>
++            <div id="propertyProfileFields" class="investment-profile hidden">
++              <div class="profile-intro"><strong>How should Nirvana treat this property?</strong><small>A primary home counts in net worth but not retirement funding unless you define a cash release.</small></div>
++              <label class="check-label"><input name="isPrimaryResidence" type="checkbox"> This is my primary residence</label>
++              <label>Retirement treatment<select name="retirementTreatment" id="retirementTreatment"><option value="keep">Keep indefinitely</option><option value="sell_at_retirement">Sell at retirement</option><option value="sell_at_age">Sell at a specific age</option><option value="downsize">Downsize and release equity</option><option value="convert_to_rental">Convert to rental</option><option value="equity_access">Home-equity / reverse-mortgage scenario</option><option value="undecided">Undecided</option></select></label>
++              <div id="propertyReleaseFields" class="hidden">
++                <div class="form-row"><label>Scenario age<input name="retirementTreatmentAge" type="number" min="18" max="120"></label><label>Net cash released, today's dollars<input name="retirementCashRelease" type="number" min="0" step="1000"></label></div>
++                <label>Property growth assumption %<input name="propertyGrowthRatePct" type="number" min="-20" max="20" step="0.1" value="3.0"></label>
++              </div>
++            </div>
++            <label>Current balance<input name="currentBalance" type="number" min="0" step="0.01" required></label>
++            <div class="form-actions"><button id="accountSubmitButton" class="button button-primary" type="submit">Add account</button><button id="accountCancelEdit" class="button button-secondary hidden" type="button">Cancel edit</button></div>
++          </form>
++        </article>
++        <article class="panel form-panel"><div class="panel-head"><div><span class="panel-kicker">MANUAL LIABILITY</span><h2 id="liabilityFormTitle">Add a debt</h2></div></div><form id="liabilityForm" class="stack-form"><label>Liability name<input name="name" required placeholder="Home mortgage"></label><label>Institution<input name="institution" placeholder="Optional"></label><label>Type<select name="liabilityType"><option value="mortgage">Mortgage</option><option value="credit_card">Credit card</option><option value="student_loan">Student loan</option><option value="auto_loan">Auto loan</option><option value="personal_loan">Personal loan</option><option value="other">Other</option></select></label><div class="form-row"><label>Balance<input name="currentBalance" type="number" min="0" step="0.01" required></label><label>Rate %<input name="interestRatePct" type="number" min="0" max="100" step="0.01"></label></div><div class="form-row"><label>Monthly payment<input name="monthlyPayment" type="number" min="0" step="0.01"></label><label>Expected payoff age<input name="payoffAge" type="number" min="18" max="120"></label></div><label>Linked property<select name="linkedAccountId" id="linkedPropertySelect"><option value="">Not linked</option></select></label><p class="mini-disclaimer">A saved monthly payment is automatically included in retirement cash flow until the payoff age. Do not enter the same payment again as an expense.</p><div class="form-actions"><button id="liabilitySubmitButton" class="button button-primary" type="submit">Add liability</button><button id="liabilityCancelEdit" class="button button-secondary hidden" type="button">Cancel edit</button></div></form></article>
+       </div>
+       <div class="dashboard-grid two-one">
+         <article class="panel"><div class="panel-head"><div><span class="panel-kicker">CONNECTED DATA</span><h2>Accounts and liabilities</h2></div><span id="aggregationBadge" class="status-pill neutral">Manual</span></div><div id="accountsList" class="account-list"></div></article>
+@@ -107,7 +213,32 @@
+     </section>
+   </main>
+ 
++
++  <button id="assistantFab" class="assistant-fab" type="button" aria-label="Open Nirvana AI">✦</button>
++  <aside id="assistantDrawer" class="assistant-drawer" aria-label="Nirvana AI Planner">
++    <div class="assistant-drawer-head">
++      <div><span class="panel-kicker">AI PLANNER ASSISTANT</span><h2>Nirvana</h2></div>
++      <button id="assistantClose" class="icon-button" type="button" aria-label="Close assistant">×</button>
++    </div>
++    <p class="assistant-welcome">Explore your plan, surface risks, and test decisions using your saved financial data.</p>
++    <div class="assistant-suggestions">
++      <button data-assistant-prompt="When can I securely retire?">When can I securely retire?</button>
++      <button data-assistant-prompt="Is my retirement plan complete and up to date?">Is my plan complete?</button>
++      <button data-assistant-prompt="How would a market crash affect my retirement accounts?">Am I prepared for a market crash?</button>
++      <button data-assistant-prompt="What scenarios should I run next?">What scenarios should I run?</button>
++    </div>
++    <div id="assistantMessages" class="assistant-messages">
++      <div class="assistant-message message"><div class="message-label">Nirvana</div><p>Ask about your retirement plan, portfolio, or a stock.</p></div>
++    </div>
++    <form id="assistantForm" class="assistant-input">
++      <textarea name="message" rows="2" maxlength="6000" placeholder="Ask anything…" required></textarea>
++      <button class="assistant-send" type="submit" aria-label="Ask Nirvana">➤</button>
++    </form>
++    <p class="assistant-disclaimer">Educational model output—not financial advice.</p>
++  </aside>
++
+   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
+-  <script src="/app.js" defer></script>
++  <script src="/app.js?v=0.3.0" defer></script>
++  <script src="/planning-ui.js?v=0.3.0" defer></script>
+ </body>
+ </html>
+diff --git a/public/app.js b/public/app.js
+index c314470..07858e9 100644
+--- a/public/app.js
++++ b/public/app.js
+@@ -82,7 +82,8 @@ function renderOverview() {
+   $('#netWorthMetric').textContent = money.format(metrics.netWorth);
+   $('#assetsMetric').textContent = money.format(metrics.assetsTotal);
+   $('#liabilitiesMetric').textContent = money.format(metrics.liabilitiesTotal);
+-  $('#portfolioMetric').textContent = money.format(metrics.liquidPortfolio);
++  $('#portfolioMetric').textContent = money.format(metrics.investableAssets ?? metrics.liquidPortfolio);
++  $('#homeEquityMetric').textContent = money.format(metrics.homeEquity || 0);
+   $('#accountCountMetric').textContent = `${metrics.accountCount} account${metrics.accountCount === 1 ? '' : 's'}`;
+   $('#holdingsCountMetric').textContent = `${metrics.holdingsCount} holding${metrics.holdingsCount === 1 ? '' : 's'}`;
+ 
+@@ -199,6 +200,49 @@ function renderProjection() {
+   }
+ }
+ 
++const investmentDefaults = {
++  growth: { expectedReturnPct: 8.0, expectedVolatilityPct: 18.0, hint: 'Higher-growth fund assumption with wider potential swings.' },
++  balanced: { expectedReturnPct: 6.0, expectedVolatilityPct: 12.0, hint: 'Balanced stock-and-bond portfolio assumption.' },
++  conservative: { expectedReturnPct: 4.0, expectedVolatilityPct: 7.0, hint: 'Lower-risk fund assumption with lower modeled growth.' },
++  self_managed: { expectedReturnPct: 7.0, expectedVolatilityPct: 20.0, hint: 'User-defined assumption for self-managed stocks. This is not a forecast.' }
++};
++
++function isRetirementType(type) {
++  return ['ira', '401k', 'retirement'].includes(type);
++}
++
++function refreshInvestmentProfile(resetValues = false) {
++  const form = $('#accountForm');
++  const type = form.accountType.value;
++  const fields = $('#investmentProfileFields');
++  fields.classList.toggle('hidden', !isRetirementType(type));
++  if (!isRetirementType(type)) return;
++
++  const style = form.investmentStyle.value || 'balanced';
++  const defaults = investmentDefaults[style];
++  if (resetValues) {
++    form.expectedReturnPct.value = defaults.expectedReturnPct;
++    form.expectedVolatilityPct.value = defaults.expectedVolatilityPct;
++  }
++  $('#investmentProfileHint').textContent = defaults.hint;
++}
++
++function refreshPropertyProfile(resetValues = false) {
++  const form = $('#accountForm');
++  const isProperty = form.accountType.value === 'property';
++  $('#propertyProfileFields').classList.toggle('hidden', !isProperty);
++  if (!isProperty) return;
++  if (resetValues) {
++    form.isPrimaryResidence.checked = false;
++    form.retirementTreatment.value = 'keep';
++    form.retirementTreatmentAge.value = '';
++    form.retirementCashRelease.value = '';
++    form.propertyGrowthRatePct.value = '3.0';
++  }
++  const treatment = form.retirementTreatment.value;
++  $('#propertyReleaseFields').classList.toggle('hidden', ['keep', 'convert_to_rental', 'undecided'].includes(treatment));
++}
++
+ function resetAccountEditor() {
+   state.editingAccountId = null;
+   const form = $('#accountForm');
+@@ -206,6 +250,16 @@ function resetAccountEditor() {
+   $('#accountFormTitle').textContent = 'Add an asset';
+   $('#accountSubmitButton').textContent = 'Add account';
+   $('#accountCancelEdit').classList.add('hidden');
++  form.investmentStyle.value = 'balanced';
++  form.expectedReturnPct.value = '6.0';
++  form.expectedVolatilityPct.value = '12.0';
++  refreshInvestmentProfile(false);
++  form.isPrimaryResidence.checked = false;
++  form.retirementTreatment.value = 'keep';
++  form.retirementTreatmentAge.value = '';
++  form.retirementCashRelease.value = '';
++  form.propertyGrowthRatePct.value = '3.0';
++  refreshPropertyProfile(false);
+ }
+ 
+ function resetLiabilityEditor() {
+@@ -226,6 +280,16 @@ function editAccount(id) {
+   form.institution.value = account.institution || '';
+   form.accountType.value = account.account_type;
+   form.currentBalance.value = account.current_balance ?? 0;
++  form.investmentStyle.value = account.investment_style || 'balanced';
++  form.expectedReturnPct.value = account.expected_return == null ? '6.0' : Number(account.expected_return) * 100;
++  form.expectedVolatilityPct.value = account.expected_volatility == null ? '12.0' : Number(account.expected_volatility) * 100;
++  form.isPrimaryResidence.checked = Boolean(account.is_primary_residence);
++  form.retirementTreatment.value = account.retirement_treatment || 'keep';
++  form.retirementTreatmentAge.value = account.retirement_treatment_age ?? '';
++  form.retirementCashRelease.value = account.retirement_cash_release ?? '';
++  form.propertyGrowthRatePct.value = account.property_growth_rate == null ? '3.0' : Number(account.property_growth_rate) * 100;
++  refreshInvestmentProfile(false);
++  refreshPropertyProfile(false);
+   $('#accountFormTitle').textContent = 'Edit asset';
+   $('#accountSubmitButton').textContent = 'Save changes';
+   $('#accountCancelEdit').classList.remove('hidden');
+@@ -243,7 +307,9 @@ function editLiability(id) {
+   form.liabilityType.value = liability.liability_type;
+   form.currentBalance.value = liability.current_balance ?? 0;
+   form.interestRatePct.value = liability.interest_rate == null ? '' : Number(liability.interest_rate) * 100;
+-  form.minimumPayment.value = liability.minimum_payment ?? '';
++  form.monthlyPayment.value = liability.monthly_payment ?? liability.minimum_payment ?? '';
++  form.payoffAge.value = liability.payoff_age ?? '';
++  form.linkedAccountId.value = liability.linked_account_id ?? '';
+   $('#liabilityFormTitle').textContent = 'Edit liability';
+   $('#liabilitySubmitButton').textContent = 'Save changes';
+   $('#liabilityCancelEdit').classList.remove('hidden');
+@@ -302,7 +368,12 @@ function renderAccounts() {
+ 
+     const details = document.createElement('div');
+     details.className = 'account-row-details';
+-    details.innerHTML = `<span><strong>${escapeHtml(row.name)}</strong></span><small>${escapeHtml(row.institution || 'Manual')} · ${escapeHtml(row.kind)}</small>`;
++    const profile = row.investment_style
++      ? ` · ${escapeHtml(row.investment_style.replaceAll('_', ' '))} · ${(Number(row.expected_return || 0) * 100).toFixed(1)}% modeled growth`
++      : row.account_type === 'property'
++        ? ` · ${row.is_primary_residence ? 'primary residence' : 'property'} · ${escapeHtml((row.retirement_treatment || 'keep').replaceAll('_', ' '))}`
++        : '';
++    details.innerHTML = `<span><strong>${escapeHtml(row.name)}</strong></span><small>${escapeHtml(row.institution || 'Manual')} · ${escapeHtml(row.kind)}${profile}</small>`;
+ 
+     const trailing = document.createElement('div');
+     trailing.className = 'account-row-trailing';
+@@ -361,6 +432,7 @@ async function loadDashboard() {
+   populateRetirementForm();
+   renderProjection();
+   await loadScenarioHistory();
++  document.dispatchEvent(new CustomEvent('nirvana:data-loaded', { detail: state }));
+ }
+ 
+ async function loadScenarioHistory() {
+@@ -396,8 +468,8 @@ function renderScenario(result) {
+     <p class="mini-disclaimer">${result.concentrationFlag ? 'Concentration flag: this holding reaches at least 25% of the modeled portfolio. ' : ''}${result.assumptions.join(' ')}</p>`;
+ }
+ 
+-function appendMessage(role, text) {
+-  const wrap = $('#chatMessages');
++function createMessage(container, role, text) {
++  if (!container) return null;
+   const message = document.createElement('div');
+   message.className = `${role === 'user' ? 'user-message' : 'assistant-message'} message`;
+   const label = document.createElement('div');
+@@ -406,11 +478,48 @@ function appendMessage(role, text) {
+   const body = document.createElement('p');
+   body.textContent = text;
+   message.append(label, body);
+-  wrap.append(message);
+-  wrap.scrollTop = wrap.scrollHeight;
++  container.append(message);
++  container.scrollTop = container.scrollHeight;
+   return message;
+ }
+ 
++function appendMessage(role, text) {
++  const main = createMessage($('#chatMessages'), role, text);
++  const drawer = createMessage($('#assistantMessages'), role, text);
++  if (main) main.mirrorMessage = drawer;
++  return main || drawer;
++}
++
++function updateMessage(message, text) {
++  if (!message) return;
++  const body = message.querySelector('p');
++  if (body) body.textContent = text;
++  const mirrorBody = message.mirrorMessage?.querySelector('p');
++  if (mirrorBody) mirrorBody.textContent = text;
++}
++
++async function askNirvana(text, button) {
++  appendMessage('user', text);
++  if (button) button.disabled = true;
++  const pending = appendMessage('assistant', 'Researching and grounding the response…');
++  try {
++    const response = await api('/api/chat', {
++      method: 'POST',
++      body: JSON.stringify({ message: text, threadId: state.threadId || undefined })
++    });
++    state.threadId = response.threadId;
++    updateMessage(pending, response.message);
++    renderResearchChart(response.chart);
++    renderSources(response.sources);
++    if (response.agents?.length) $('#skillCount').textContent = `${response.agents.length} agents active`;
++    $('#disclaimerBox').textContent = `${response.disclaimer.title}: ${response.disclaimer.text} ${response.disclaimer.marketDataNotice}`;
++  } catch (error) {
++    updateMessage(pending, `I could not complete that request: ${error.message}`);
++  } finally {
++    if (button) button.disabled = false;
++  }
++}
++
+ function renderResearchChart(chart) {
+   if (!chart || typeof Chart === 'undefined') return;
+   $('#researchChartEmpty').classList.add('hidden');
+@@ -500,7 +609,10 @@ async function initialize() {
+           annualRetirementSpending: values.annualRetirementSpending,
+           expectedReturn: Number(values.expectedReturnPct) / 100,
+           volatility: Number(values.volatilityPct) / 100,
+-          inflation: Number(values.inflationPct) / 100
++          inflation: Number(values.inflationPct) / 100,
++          successThreshold: Number(values.successThresholdPct) / 100,
++          maxSearchAge: values.maxSearchAge,
++          effectiveTaxRate: Number(values.effectiveTaxRatePct) / 100
+         })
+       });
+       await loadDashboard();
+@@ -532,11 +644,31 @@ async function initialize() {
+     button.disabled = true;
+     try {
+       const editing = Boolean(state.editingAccountId);
++      const values = formObject(form);
++      const payload = {
++        name: values.name,
++        institution: values.institution,
++        accountType: values.accountType,
++        currentBalance: values.currentBalance,
++        currency: 'USD'
++      };
++      if (isRetirementType(values.accountType)) {
++        payload.investmentStyle = values.investmentStyle;
++        payload.expectedReturn = Number(values.expectedReturnPct) / 100;
++        payload.expectedVolatility = Number(values.expectedVolatilityPct) / 100;
++      }
++      if (values.accountType === 'property') {
++        payload.isPrimaryResidence = form.isPrimaryResidence.checked;
++        payload.retirementTreatment = values.retirementTreatment;
++        payload.retirementTreatmentAge = values.retirementTreatmentAge || null;
++        payload.retirementCashRelease = values.retirementCashRelease || null;
++        payload.propertyGrowthRate = Number(values.propertyGrowthRatePct || 3) / 100;
++      }
+       await api(
+         editing ? `/api/accounts/${state.editingAccountId}` : '/api/accounts',
+         {
+           method: editing ? 'PUT' : 'POST',
+-          body: JSON.stringify(formObject(form))
++          body: JSON.stringify(payload)
+         }
+       );
+       resetAccountEditor();
+@@ -546,6 +678,12 @@ async function initialize() {
+   });
+ 
+   $('#accountCancelEdit').addEventListener('click', resetAccountEditor);
++  $('#accountType').addEventListener('change', () => {
++    refreshInvestmentProfile(true);
++    refreshPropertyProfile(true);
++  });
++  $('#investmentStyle').addEventListener('change', () => refreshInvestmentProfile(true));
++  $('#retirementTreatment').addEventListener('change', () => refreshPropertyProfile(false));
+ 
+   $('#liabilityForm').addEventListener('submit', async (event) => {
+     event.preventDefault();
+@@ -559,7 +697,10 @@ async function initialize() {
+       delete payload.interestRatePct;
+       if (values.interestRatePct !== '') payload.interestRate = Number(values.interestRatePct) / 100;
+       else delete payload.interestRate;
+-      if (!payload.minimumPayment) delete payload.minimumPayment;
++      payload.minimumPayment = values.monthlyPayment || null;
++      payload.monthlyPayment = values.monthlyPayment || null;
++      payload.payoffAge = values.payoffAge || null;
++      payload.linkedAccountId = values.linkedAccountId || null;
+ 
+       await api(
+         editing ? `/api/accounts/liabilities/${state.editingLiabilityId}` : '/api/accounts/liabilities',
+@@ -599,23 +740,34 @@ async function initialize() {
+     const form = event.currentTarget;
+     const text = form.message.value.trim();
+     if (!text) return;
+-    const button = event.submitter;
+-    appendMessage('user', text);
+     form.message.value = '';
+-    button.disabled = true;
+-    const pending = appendMessage('assistant', 'Researching and grounding the response…');
+-    try {
+-      const response = await api('/api/chat', { method: 'POST', body: JSON.stringify({ message: text, threadId: state.threadId || undefined }) });
+-      state.threadId = response.threadId;
+-      pending.querySelector('p').textContent = response.message;
+-      renderResearchChart(response.chart);
+-      renderSources(response.sources);
+-      if (response.agents?.length) $('#skillCount').textContent = `${response.agents.length} agents active`;
+-      $('#disclaimerBox').textContent = `${response.disclaimer.title}: ${response.disclaimer.text} ${response.disclaimer.marketDataNotice}`;
+-    } catch (error) {
+-      pending.querySelector('p').textContent = `I could not complete that request: ${error.message}`;
+-    } finally { button.disabled = false; }
++    await askNirvana(text, event.submitter);
++  });
++
++  const setAssistantOpen = (open) => {
++    $('#assistantDrawer').classList.toggle('open', open);
++    document.body.classList.toggle('assistant-open', open);
++  };
++  $('#assistantToggle').addEventListener('click', () => setAssistantOpen(true));
++  $('#assistantFab').addEventListener('click', () => setAssistantOpen(true));
++  $('#assistantClose').addEventListener('click', () => setAssistantOpen(false));
++
++  $$('[data-assistant-prompt]').forEach((button) => button.addEventListener('click', () => {
++    $('#assistantForm').message.value = button.dataset.assistantPrompt;
++    $('#assistantForm').message.focus();
++  }));
++
++  $('#assistantForm').addEventListener('submit', async (event) => {
++    event.preventDefault();
++    const form = event.currentTarget;
++    const text = form.message.value.trim();
++    if (!text) return;
++    form.message.value = '';
++    await askNirvana(text, event.submitter);
+   });
+ }
+ 
++window.nirvanaState = state;
++window.loadNirvanaDashboard = loadDashboard;
++window.showNirvanaAlert = showAlert;
+ document.addEventListener('DOMContentLoaded', initialize);
+diff --git a/public/planning-ui.js b/public/planning-ui.js
+new file mode 100644
+index 0000000..26676a3
+--- /dev/null
++++ b/public/planning-ui.js
+@@ -0,0 +1,429 @@
++(() => {
++  const q = (selector, root = document) => root.querySelector(selector);
++  const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
++  const charts = {};
++  let planning = { incomes: [], expenses: [], metrics: {} };
++  let editingIncomeId = null;
++  let editingExpenseId = null;
++
++  async function request(url, options = {}) {
++    const response = await fetch(url, {
++      ...options,
++      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
++    });
++    const payload = await response.json().catch(() => null);
++    if (!response.ok) {
++      const details = payload?.details?.map((item) => `${item.path}: ${item.message}`).join('; ');
++      throw new Error(details || payload?.error || `Request failed (${response.status})`);
++    }
++    return payload;
++  }
++
++  function alertUser(message) {
++    if (window.showNirvanaAlert) window.showNirvanaAlert(message);
++    else window.alert(message);
++  }
++
++  function destroyChart(name) {
++    charts[name]?.destroy();
++    delete charts[name];
++  }
++
++  function chartColors() {
++    const style = getComputedStyle(document.documentElement);
++    return {
++      ink: style.getPropertyValue('--ink').trim(),
++      soft: style.getPropertyValue('--ink-soft').trim(),
++      accent: style.getPropertyValue('--accent').trim(),
++      accentPale: style.getPropertyValue('--accent-pale').trim(),
++      sand: style.getPropertyValue('--sand').trim(),
++      line: style.getPropertyValue('--line').trim()
++    };
++  }
++
++  function retirementBehaviorLabel(value) {
++    return {
++      same: 'continues in retirement',
++      ends: 'ends at retirement',
++      custom: 'changes at retirement',
++      starts: 'starts at retirement'
++    }[value] || value;
++  }
++
++  function createActionButton(label, className, handler) {
++    const button = document.createElement('button');
++    button.type = 'button';
++    button.className = className;
++    button.textContent = label;
++    button.addEventListener('click', handler);
++    return button;
++  }
++
++  function resetIncomeForm() {
++    editingIncomeId = null;
++    const form = q('#incomeForm');
++    form.reset();
++    form.frequency.value = 'monthly';
++    form.inflationRatePct.value = '0';
++    form.taxable.checked = true;
++    q('#incomeFormTitle').textContent = 'Add income source';
++    q('#incomeSubmitButton').textContent = 'Add income';
++    q('#incomeCancelEdit').classList.add('hidden');
++  }
++
++  function resetExpenseForm() {
++    editingExpenseId = null;
++    const form = q('#expenseForm');
++    form.reset();
++    form.frequency.value = 'monthly';
++    form.postRetirementFrequency.value = 'monthly';
++    form.inflationRatePct.value = '2.5';
++    form.essential.checked = true;
++    q('#expenseFormTitle').textContent = 'Add monthly expense';
++    q('#expenseSubmitButton').textContent = 'Add expense';
++    q('#expenseCancelEdit').classList.add('hidden');
++    togglePostRetirementFields();
++  }
++
++  function editIncome(id) {
++    const item = planning.incomes.find((row) => row.id === id);
++    if (!item) return;
++    editingIncomeId = id;
++    const form = q('#incomeForm');
++    form.name.value = item.name || '';
++    form.incomeType.value = item.income_type || 'other';
++    form.amount.value = Number(item.amount || 0).toFixed(2);
++    form.frequency.value = item.frequency || 'monthly';
++    form.startAge.value = item.start_age ?? '';
++    form.endAge.value = item.end_age ?? '';
++    form.inflationRatePct.value = Number(item.inflation_rate || 0) * 100;
++    form.taxable.checked = item.taxable !== false;
++    form.endsAtRetirement.checked = Boolean(item.ends_at_retirement);
++    form.notes.value = item.notes || '';
++    q('#incomeFormTitle').textContent = 'Edit income source';
++    q('#incomeSubmitButton').textContent = 'Save changes';
++    q('#incomeCancelEdit').classList.remove('hidden');
++    form.name.focus();
++  }
++
++  function editExpense(id) {
++    const item = planning.expenses.find((row) => row.id === id);
++    if (!item) return;
++    editingExpenseId = id;
++    const form = q('#expenseForm');
++    form.name.value = item.name || '';
++    form.category.value = item.category || 'other';
++    form.amount.value = Number(item.amount || 0).toFixed(2);
++    form.frequency.value = item.frequency || 'monthly';
++    form.retirementBehavior.value = item.retirement_behavior || 'same';
++    form.postRetirementAmount.value = item.post_retirement_amount == null ? '' : Number(item.post_retirement_amount).toFixed(2);
++    form.postRetirementFrequency.value = item.post_retirement_frequency || 'monthly';
++    form.startAge.value = item.start_age ?? '';
++    form.endAge.value = item.end_age ?? '';
++    form.inflationRatePct.value = Number(item.inflation_rate || 0) * 100;
++    form.essential.checked = item.essential !== false;
++    form.notes.value = item.notes || '';
++    q('#expenseFormTitle').textContent = 'Edit expense';
++    q('#expenseSubmitButton').textContent = 'Save changes';
++    q('#expenseCancelEdit').classList.remove('hidden');
++    togglePostRetirementFields();
++    form.name.focus();
++  }
++
++  function renderIncomeList() {
++    const container = q('#incomeList');
++    container.replaceChildren();
++    if (!planning.incomes.length) {
++      container.innerHTML = '<div class="empty-inline">Add salary, Social Security, pension, rental, or other income.</div>';
++      return;
++    }
++    planning.incomes.forEach((item) => {
++      const row = document.createElement('div');
++      row.className = 'cashflow-row';
++      const details = document.createElement('div');
++      const title = document.createElement('strong');
++      title.textContent = item.name;
++      const meta = document.createElement('small');
++      meta.textContent = `${String(item.income_type).replaceAll('_', ' ')} · ${item.ends_at_retirement ? 'ends at retirement' : 'continues by age range'}`;
++      details.append(title, meta);
++      const trailing = document.createElement('div');
++      trailing.className = 'cashflow-row-trailing';
++      const amount = document.createElement('strong');
++      amount.textContent = `${currency.format(Number(item.annual_amount || 0) / 12)}/mo`;
++      const actions = document.createElement('div');
++      actions.className = 'row-actions';
++      actions.append(
++        createActionButton('Edit', 'row-action', () => editIncome(item.id)),
++        createActionButton('Delete', 'row-action danger', async () => {
++          if (!window.confirm(`Delete "${item.name}"?`)) return;
++          try {
++            await request(`/api/planning/incomes/${item.id}`, { method: 'DELETE' });
++            await refreshEverything();
++            alertUser('Income source deleted.');
++          } catch (error) { alertUser(error.message); }
++        })
++      );
++      trailing.append(amount, actions);
++      row.append(details, trailing);
++      container.append(row);
++    });
++  }
++
++  function renderExpenseList() {
++    const container = q('#expenseList');
++    container.replaceChildren();
++    if (!planning.expenses.length) {
++      container.innerHTML = '<div class="empty-inline">Add housing, healthcare, travel, food, and other recurring expenses.</div>';
++      return;
++    }
++    planning.expenses.forEach((item) => {
++      const row = document.createElement('div');
++      row.className = 'cashflow-row';
++      const details = document.createElement('div');
++      const title = document.createElement('strong');
++      title.textContent = item.name;
++      const meta = document.createElement('small');
++      const end = item.end_age == null ? '' : ` · ends age ${item.end_age}`;
++      meta.textContent = `${String(item.category).replaceAll('_', ' ')} · ${retirementBehaviorLabel(item.retirement_behavior)}${end}`;
++      details.append(title, meta);
++      const trailing = document.createElement('div');
++      trailing.className = 'cashflow-row-trailing';
++      const amount = document.createElement('strong');
++      amount.textContent = `${currency.format(Number(item.annual_amount || 0) / 12)}/mo`;
++      const actions = document.createElement('div');
++      actions.className = 'row-actions';
++      if (item.derived_from_liability) {
++        const badge = document.createElement('span');
++        badge.className = 'derived-badge';
++        badge.textContent = 'From liability';
++        actions.append(badge);
++      } else {
++        actions.append(
++          createActionButton('Edit', 'row-action', () => editExpense(item.id)),
++          createActionButton('Delete', 'row-action danger', async () => {
++            if (!window.confirm(`Delete \"${item.name}\"?`)) return;
++            try {
++              await request(`/api/planning/expenses/${item.id}`, { method: 'DELETE' });
++              await refreshEverything();
++              alertUser('Expense deleted.');
++            } catch (error) { alertUser(error.message); }
++          })
++        );
++      }
++      trailing.append(amount, actions);
++      row.append(details, trailing);
++      container.append(row);
++    });
++  }
++
++  function renderPlanningMetrics() {
++    const metrics = planning.metrics || {};
++    q('#currentIncomeMetric').textContent = currency.format(metrics.currentMonthlyIncome || 0);
++    q('#currentExpenseMetric').textContent = currency.format(metrics.currentMonthlyExpenses || 0);
++    q('#currentSurplusMetric').textContent = currency.format(metrics.currentMonthlySurplus || 0);
++    q('#retirementGapMetric').textContent = currency.format(metrics.retirementMonthlyGap || 0);
++  }
++
++  function populateLinkedProperties(summary) {
++    const select = q('#linkedPropertySelect');
++    if (!select) return;
++    const selected = select.value;
++    select.replaceChildren(new Option('Not linked', ''));
++    for (const account of summary?.accounts || []) {
++      if (account.account_type === 'property') select.add(new Option(account.name, account.id));
++    }
++    select.value = selected;
++  }
++
++  function populateAdvancedPlanFields(summary) {
++    const form = q('#retirementForm');
++    const plan = summary?.retirementPlan;
++    if (!form || !plan) return;
++    form.successThresholdPct.value = Number(plan.success_threshold ?? 0.90) * 100;
++    form.maxSearchAge.value = plan.max_search_age ?? 75;
++    form.effectiveTaxRatePct.value = Number(plan.effective_tax_rate ?? 0.15) * 100;
++  }
++
++  function renderRetirementEnhancements(state) {
++    const projection = state?.projection;
++    const summary = state?.summary;
++    if (!projection || !summary) return;
++
++    q('#earliestFeasibleAge').textContent = projection.earliestFeasibleAge ?? 'Not reached';
++    q('#earliestFeasibleCopy').textContent = projection.earliestFeasibleAge == null
++      ? `No age through ${summary.retirementPlan?.max_search_age || 75} met ${projection.successThresholdPct}%`
++      : `${projection.successThresholdPct}% success threshold`;
++    q('#selectedAgeSuccess').textContent = `${projection.successRatePct}%`;
++    q('#selectedAgeLabel').textContent = `Retire at age ${projection.retirementAge}`;
++    q('#retirementExpenseMetric').textContent = currency.format(projection.monthlyExpensesAtRetirement || 0);
++    q('#homeEquityRetirementMetric').textContent = currency.format(summary.metrics.homeEquity || 0);
++    populateLinkedProperties(summary);
++    populateAdvancedPlanFields(summary);
++
++    const table = q('#retirementAgeTable');
++    table.replaceChildren();
++    const selectedAge = projection.retirementAge;
++    const earliest = projection.earliestFeasibleAge;
++    const rows = (projection.ageResults || []).filter((row) =>
++      row.retirementAge === earliest || Math.abs(row.retirementAge - selectedAge) <= 3
++    );
++    for (const row of rows) {
++      const tr = document.createElement('tr');
++      if (row.retirementAge === earliest) tr.className = 'feasible-row';
++      tr.innerHTML = `<td><strong>${row.retirementAge}${row.retirementAge === earliest ? ' ✓' : ''}</strong></td><td>${row.successRatePct}%</td><td>${currency.format(row.medianAtEnd)}</td>`;
++      table.append(tr);
++    }
++
++    if (typeof Chart !== 'undefined' && projection.cashflowTimeline?.length) {
++      const colors = chartColors();
++      const labels = projection.cashflowTimeline.map((row) => row.age);
++      destroyChart('retirementCashflow');
++      charts.retirementCashflow = new Chart(q('#retirementCashflowChart'), {
++        type: 'line',
++        data: {
++          labels,
++          datasets: [
++            { label: 'After-tax income', data: projection.cashflowTimeline.map((row) => row.monthlyIncome), borderColor: colors.accent, backgroundColor: colors.accent, borderWidth: 2.5, pointRadius: 0, tension: .25 },
++            { label: 'Expenses', data: projection.cashflowTimeline.map((row) => row.monthlyExpenses), borderColor: colors.sand, backgroundColor: colors.sand, borderWidth: 2.5, pointRadius: 0, tension: .25 },
++            { label: 'Portfolio withdrawal', data: projection.cashflowTimeline.map((row) => row.monthlyPortfolioWithdrawal), borderColor: colors.ink, backgroundColor: colors.ink, borderDash: [5, 4], borderWidth: 2, pointRadius: 0, tension: .25 }
++          ]
++        },
++        options: {
++          responsive: true,
++          maintainAspectRatio: false,
++          interaction: { intersect: false, mode: 'index' },
++          plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 7 } } },
++          scales: {
++            x: { grid: { display: false }, title: { display: true, text: 'Age' } },
++            y: { grid: { color: colors.line }, ticks: { callback: (value) => currency.format(value) } }
++          }
++        }
++      });
++
++      destroyChart('cashflow');
++      charts.cashflow = new Chart(q('#cashflowChart'), {
++        type: 'line',
++        data: {
++          labels,
++          datasets: [
++            { label: 'Monthly income', data: projection.cashflowTimeline.map((row) => row.monthlyIncome), borderColor: colors.accent, backgroundColor: colors.accentPale, borderWidth: 3, pointRadius: 0, fill: false, tension: .25 },
++            { label: 'Monthly expenses', data: projection.cashflowTimeline.map((row) => row.monthlyExpenses), borderColor: colors.sand, backgroundColor: colors.sand, borderWidth: 3, pointRadius: 0, fill: false, tension: .25 }
++          ]
++        },
++        options: {
++          responsive: true,
++          maintainAspectRatio: false,
++          interaction: { intersect: false, mode: 'index' },
++          plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 7 } } },
++          scales: {
++            x: { grid: { display: false }, title: { display: true, text: 'Age' } },
++            y: { grid: { color: colors.line }, ticks: { callback: (value) => currency.format(value) } }
++          }
++        }
++      });
++    }
++  }
++
++  async function loadPlanningSummary() {
++    planning = await request('/api/planning/summary');
++    renderPlanningMetrics();
++    renderIncomeList();
++    renderExpenseList();
++  }
++
++  async function refreshEverything() {
++    if (window.loadNirvanaDashboard) await window.loadNirvanaDashboard();
++    await loadPlanningSummary();
++  }
++
++  function togglePostRetirementFields() {
++    const behavior = q('#expenseForm').retirementBehavior.value;
++    q('#postRetirementExpenseFields').classList.toggle('hidden', !['custom', 'starts'].includes(behavior));
++  }
++
++  function incomePayload(form) {
++    return {
++      name: form.name.value,
++      incomeType: form.incomeType.value,
++      amount: form.amount.value,
++      frequency: form.frequency.value,
++      startAge: form.startAge.value || null,
++      endAge: form.endAge.value || null,
++      inflationRate: Number(form.inflationRatePct.value || 0) / 100,
++      taxable: form.taxable.checked,
++      endsAtRetirement: form.endsAtRetirement.checked,
++      notes: form.notes.value || null
++    };
++  }
++
++  function expensePayload(form) {
++    return {
++      name: form.name.value,
++      category: form.category.value,
++      amount: form.amount.value,
++      frequency: form.frequency.value,
++      retirementBehavior: form.retirementBehavior.value,
++      postRetirementAmount: form.postRetirementAmount.value || null,
++      postRetirementFrequency: form.postRetirementFrequency.value,
++      startAge: form.startAge.value || null,
++      endAge: form.endAge.value || null,
++      inflationRate: Number(form.inflationRatePct.value || 0) / 100,
++      essential: form.essential.checked,
++      notes: form.notes.value || null
++    };
++  }
++
++  document.addEventListener('nirvana:data-loaded', (event) => {
++    renderRetirementEnhancements(event.detail);
++    loadPlanningSummary().catch((error) => alertUser(error.message));
++  });
++
++  document.addEventListener('DOMContentLoaded', () => {
++    q('#retirementBehavior').addEventListener('change', togglePostRetirementFields);
++    q('#incomeCancelEdit').addEventListener('click', resetIncomeForm);
++    q('#expenseCancelEdit').addEventListener('click', resetExpenseForm);
++
++    q('#incomeForm').addEventListener('submit', async (event) => {
++      event.preventDefault();
++      const form = event.currentTarget;
++      const button = event.submitter;
++      button.disabled = true;
++      try {
++        const editing = Boolean(editingIncomeId);
++        await request(editing ? `/api/planning/incomes/${editingIncomeId}` : '/api/planning/incomes', {
++          method: editing ? 'PUT' : 'POST',
++          body: JSON.stringify(incomePayload(form))
++        });
++        resetIncomeForm();
++        await refreshEverything();
++        alertUser(editing ? 'Income source updated.' : 'Income source added.');
++      } catch (error) { alertUser(error.message); }
++      finally { button.disabled = false; }
++    });
++
++    q('#expenseForm').addEventListener('submit', async (event) => {
++      event.preventDefault();
++      const form = event.currentTarget;
++      const button = event.submitter;
++      button.disabled = true;
++      try {
++        const editing = Boolean(editingExpenseId);
++        await request(editing ? `/api/planning/expenses/${editingExpenseId}` : '/api/planning/expenses', {
++          method: editing ? 'PUT' : 'POST',
++          body: JSON.stringify(expensePayload(form))
++        });
++        resetExpenseForm();
++        await refreshEverything();
++        alertUser(editing ? 'Expense updated.' : 'Expense added.');
++      } catch (error) { alertUser(error.message); }
++      finally { button.disabled = false; }
++    });
++
++    q('#retirementForm').addEventListener('submit', () => {
++      window.setTimeout(() => refreshEverything().catch((error) => alertUser(error.message)), 700);
++    });
++
++    resetIncomeForm();
++    resetExpenseForm();
++  });
++})();
+diff --git a/public/styles.css b/public/styles.css
+index 874450a..357cba3 100644
+--- a/public/styles.css
++++ b/public/styles.css
+@@ -238,3 +238,213 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
+     justify-items: start;
+   }
+ }
++
++/* Retirement account profiles + persistent AI planner */
++:root {
++  --nirvana-deep: #073e46;
++  --nirvana-teal: #087f73;
++  --nirvana-mint: #dff5eb;
++  --nirvana-green: #05a66a;
++  --nirvana-canvas: #f7faf8;
++}
++.app-body { background: var(--nirvana-canvas); }
++.sidebar { background: var(--nirvana-deep); }
++.metric-featured, .button-primary, .user-message { background: var(--nirvana-deep); }
++.panel, .metric-card { box-shadow: 0 8px 30px rgba(7,62,70,.055); border-color: #dce7e2; }
++.panel { border-radius: 16px; }
++.metric-card { border-radius: 16px; }
++.panel-kicker, .eyebrow { color: var(--nirvana-teal); }
++.button-primary { border-radius: 9px; }
++.assistant-toggle {
++  border: 1px solid #c9ddd6;
++  background: white;
++  color: var(--nirvana-deep);
++  border-radius: 999px;
++  padding: .62rem .9rem;
++  font-weight: 800;
++  cursor: pointer;
++}
++.investment-profile {
++  border: 1px solid #cce4da;
++  background: linear-gradient(145deg, #f4fbf7, #e9f7f0);
++  border-radius: 14px;
++  padding: 1rem;
++  display: grid;
++  gap: .85rem;
++}
++.profile-intro strong, .profile-intro small { display: block; }
++.profile-intro small { color: var(--ink-soft); margin-top: .2rem; }
++
++.assistant-fab {
++  position: fixed;
++  right: 24px;
++  bottom: 24px;
++  z-index: 55;
++  width: 54px;
++  height: 54px;
++  border: 0;
++  border-radius: 50%;
++  background: var(--nirvana-deep);
++  color: white;
++  font-size: 1.35rem;
++  box-shadow: 0 14px 38px rgba(7,62,70,.28);
++  cursor: pointer;
++}
++.assistant-drawer {
++  position: fixed;
++  z-index: 60;
++  top: 0;
++  right: 0;
++  width: min(390px, 94vw);
++  height: 100vh;
++  background: #fffdfa;
++  border-left: 1px solid #dce7e2;
++  box-shadow: -20px 0 55px rgba(7,62,70,.12);
++  padding: 1.25rem;
++  display: flex;
++  flex-direction: column;
++  transform: translateX(105%);
++  transition: transform .24s ease;
++}
++.assistant-drawer.open { transform: translateX(0); }
++.assistant-drawer-head {
++  display: flex;
++  align-items: flex-start;
++  justify-content: space-between;
++  border-bottom: 1px solid #e3ebe7;
++  padding-bottom: .9rem;
++}
++.assistant-drawer-head h2 {
++  margin: 0;
++  font-family: Georgia, serif;
++  color: var(--nirvana-deep);
++}
++.assistant-welcome {
++  color: var(--ink-soft);
++  font-size: .86rem;
++  margin: 1rem 0;
++}
++.assistant-suggestions {
++  display: grid;
++  gap: .45rem;
++  margin-bottom: .8rem;
++}
++.assistant-suggestions button {
++  text-align: left;
++  border: 1px solid #d7e3df;
++  background: white;
++  color: var(--nirvana-deep);
++  border-radius: 8px;
++  padding: .58rem .7rem;
++  cursor: pointer;
++  font-size: .8rem;
++}
++.assistant-suggestions button:hover { border-color: var(--nirvana-teal); }
++.assistant-messages {
++  flex: 1;
++  overflow-y: auto;
++  background: #f8faf8;
++  border: 1px solid #e1e9e5;
++  border-radius: 12px;
++  padding: .5rem;
++}
++.assistant-messages .message { max-width: 94%; font-size: .86rem; }
++.assistant-input {
++  margin-top: .75rem;
++  display: grid;
++  grid-template-columns: 1fr 42px;
++  gap: .45rem;
++  align-items: end;
++  border: 1px solid #d8e3de;
++  background: white;
++  border-radius: 12px;
++  padding: .45rem;
++}
++.assistant-input textarea {
++  border: 0;
++  box-shadow: none;
++  resize: none;
++}
++.assistant-send {
++  width: 40px;
++  height: 40px;
++  border: 0;
++  border-radius: 50%;
++  background: var(--nirvana-deep);
++  color: white;
++  cursor: pointer;
++}
++.assistant-disclaimer {
++  color: var(--ink-soft);
++  font-size: .68rem;
++  margin: .5rem 0 0;
++  text-align: center;
++}
++@media (min-width: 1500px) {
++  .assistant-drawer.open ~ * {}
++  body.assistant-open .app-main { margin-right: 390px; transition: margin-right .24s ease; }
++}
++@media (max-width: 760px) {
++  .assistant-toggle { display: none; }
++  .assistant-drawer { width: 100vw; }
++}
++
++/* Retirement cash-flow planner */
++.metric-grid-five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
++.retirement-metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
++.stack-form label > small { color: var(--ink-soft); font-weight: 500; line-height: 1.35; }
++.check-label {
++  display: flex !important;
++  grid-template-columns: auto 1fr;
++  align-items: center;
++  gap: .55rem !important;
++  min-height: 42px;
++  padding: .65rem .75rem;
++  border: 1px solid var(--line);
++  border-radius: 10px;
++  background: white;
++}
++.check-label input { width: auto; margin: 0; }
++.cashflow-list { display: grid; gap: .2rem; }
++.cashflow-row {
++  display: grid;
++  grid-template-columns: minmax(0, 1fr) auto;
++  gap: 1rem;
++  align-items: center;
++  padding: .85rem 0;
++  border-bottom: 1px solid var(--line);
++}
++.cashflow-row > div:first-child { min-width: 0; }
++.cashflow-row strong, .cashflow-row small { display: block; }
++.cashflow-row small { color: var(--ink-soft); margin-top: .18rem; text-transform: capitalize; }
++.cashflow-row-trailing { display: grid; justify-items: end; gap: .45rem; }
++.cashflow-row-trailing > strong { white-space: nowrap; font-family: Georgia, serif; }
++.retirement-age-table { max-height: 390px; overflow-y: auto; }
++.feasible-row { background: #eaf8f1; }
++.feasible-row td { color: var(--nirvana-deep); }
++#propertyReleaseFields { display: grid; gap: .85rem; }
++#propertyReleaseFields.hidden { display: none !important; }
++#postRetirementExpenseFields.hidden { display: none !important; }
++
++@media (max-width: 1320px) {
++  .metric-grid-five { grid-template-columns: repeat(3, minmax(0, 1fr)); }
++  .retirement-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
++}
++@media (max-width: 900px) {
++  .metric-grid-five, .retirement-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
++}
++@media (max-width: 620px) {
++  .metric-grid-five, .retirement-metric-grid { grid-template-columns: 1fr; }
++  .cashflow-row { grid-template-columns: 1fr; }
++  .cashflow-row-trailing { justify-items: start; }
++}
++.derived-badge {
++  display: inline-flex;
++  align-items: center;
++  padding: .28rem .55rem;
++  border-radius: 999px;
++  background: var(--accent-pale);
++  color: var(--accent-dark);
++  font-size: .7rem;
++  font-weight: 800;
++}
+diff --git a/scripts/migrate.js b/scripts/migrate.js
+index ecd372f..9f2fb89 100644
+--- a/scripts/migrate.js
++++ b/scripts/migrate.js
+@@ -5,11 +5,45 @@ import { fileURLToPath } from 'node:url';
+ import { pool } from '../server/db.js';
+ 
+ const __dirname = path.dirname(fileURLToPath(import.meta.url));
+-const sql = await fs.readFile(path.join(__dirname, '..', 'db', '001_init.sql'), 'utf8');
++const migrationsDir = path.join(__dirname, '..', 'db');
++
++async function ensureMigrationTable() {
++  await pool.query(`
++    CREATE TABLE IF NOT EXISTS schema_migrations (
++      filename TEXT PRIMARY KEY,
++      applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
++    )
++  `);
++}
++
++async function run() {
++  await ensureMigrationTable();
++  const files = (await fs.readdir(migrationsDir))
++    .filter((name) => /^\d+.*\.sql$/i.test(name))
++    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
++
++  for (const filename of files) {
++    const alreadyApplied = await pool.query(
++      'SELECT 1 FROM schema_migrations WHERE filename = $1',
++      [filename]
++    );
++    if (alreadyApplied.rowCount) {
++      console.log(`Skipping ${filename}; already applied.`);
++      continue;
++    }
++
++    const sql = await fs.readFile(path.join(migrationsDir, filename), 'utf8');
++    console.log(`Applying ${filename}...`);
++    await pool.query(sql);
++    await pool.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [filename]);
++    console.log(`Applied ${filename}.`);
++  }
++
++  console.log('Nirvana database migrations completed.');
++}
+ 
+ try {
+-  await pool.query(sql);
+-  console.log('Nirvana database migration completed.');
++  await run();
+ } finally {
+   await pool.end();
+ }
+diff --git a/server/index.js b/server/index.js
+index 20d11f1..926ed1f 100644
+--- a/server/index.js
++++ b/server/index.js
+@@ -16,6 +16,7 @@ import { accountsRouter } from './routes/accounts.js';
+ import { marketRouter } from './routes/market.js';
+ import { scenariosRouter } from './routes/scenarios.js';
+ import { retirementRouter } from './routes/retirement.js';
++import { planningRouter } from './routes/planning.js';
+ import { chatRouter } from './routes/chat.js';
+ import { settingsRouter } from './routes/settings.js';
+ import { stripeRouter, stripeWebhookHandler } from './routes/stripe.js';
+@@ -79,7 +80,7 @@ app.get('/api/health', async (_req, res) => {
+     service: 'nirvana',
+     status: database === 'ok' ? 'ok' : 'degraded',
+     database,
+-    version: '0.1.0'
++    version: '0.3.0'
+   });
+ });
+ 
+@@ -103,6 +104,7 @@ app.use('/api/accounts', requireAuth, householdContext, accountsRouter);
+ app.use('/api/market', requireAuth, householdContext, marketRouter);
+ app.use('/api/scenarios', requireAuth, householdContext, scenariosRouter);
+ app.use('/api/retirement', requireAuth, householdContext, retirementRouter);
++app.use('/api/planning', requireAuth, householdContext, planningRouter);
+ app.use('/api/chat', aiLimiter, requireAuth, householdContext, chatRouter);
+ app.use('/api/settings', requireAuth, householdContext, settingsRouter);
+ app.use('/api/stripe', requireAuth, householdContext, stripeRouter);
+@@ -110,7 +112,12 @@ app.use('/api/stripe', requireAuth, householdContext, stripeRouter);
+ app.use(express.static(publicDir, {
+   extensions: ['html'],
+   etag: true,
+-  maxAge: config.nodeEnv === 'production' ? '1h' : 0
++  maxAge: config.nodeEnv === 'production' ? '1h' : 0,
++  setHeaders(res, filePath) {
++    if (filePath.endsWith('.html')) {
++      res.setHeader('Cache-Control', 'no-cache');
++    }
++  }
+ }));
+ 
+ app.use((req, res) => {
+diff --git a/server/routes/accounts.js b/server/routes/accounts.js
+index 1f2d07b..4ba2567 100644
+--- a/server/routes/accounts.js
++++ b/server/routes/accounts.js
+@@ -7,21 +7,90 @@ import { pool, withTransaction } from '../db.js';
+ export const accountsRouter = Router();
+ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
+ 
++const retirementAccountTypes = new Set(['ira', '401k', 'retirement']);
++
++const styleDefaults = {
++  growth: { expectedReturn: 0.08, expectedVolatility: 0.18 },
++  balanced: { expectedReturn: 0.06, expectedVolatility: 0.12 },
++  conservative: { expectedReturn: 0.04, expectedVolatility: 0.07 },
++  self_managed: { expectedReturn: 0.07, expectedVolatility: 0.20 }
++};
++
+ const accountSchema = z.object({
+   name: z.string().min(1).max(120),
+   institution: z.string().max(120).optional().nullable(),
+-  accountType: z.enum(['cash', 'brokerage', 'retirement', 'property', 'hsa', '529', 'other_asset']),
++  accountType: z.enum(['cash', 'brokerage', 'ira', '401k', 'retirement', 'property', 'hsa', '529', 'other_asset']),
+   currentBalance: z.coerce.number().min(0),
+-  currency: z.string().length(3).default('USD')
++  currency: z.string().length(3).default('USD'),
++  investmentStyle: z.enum(['growth', 'balanced', 'conservative', 'self_managed']).optional().nullable(),
++  expectedReturn: z.coerce.number().min(-0.5).max(0.5).optional().nullable(),
++  expectedVolatility: z.coerce.number().min(0).max(1).optional().nullable(),
++  isPrimaryResidence: z.coerce.boolean().optional().default(false),
++  retirementTreatment: z.enum([
++    'keep', 'sell_at_retirement', 'sell_at_age', 'downsize',
++    'convert_to_rental', 'equity_access', 'undecided'
++  ]).optional().default('keep'),
++  retirementTreatmentAge: z.coerce.number().int().min(18).max(120).optional().nullable(),
++  retirementCashRelease: z.coerce.number().min(0).optional().nullable(),
++  propertyGrowthRate: z.coerce.number().min(-0.2).max(0.2).optional().default(0.03)
++}).superRefine((value, ctx) => {
++  if (retirementAccountTypes.has(value.accountType) && !value.investmentStyle) {
++    ctx.addIssue({
++      code: z.ZodIssueCode.custom,
++      path: ['investmentStyle'],
++      message: 'Choose an investment style for this retirement account'
++    });
++  }
++  if (value.accountType === 'property' && ['sell_at_age', 'downsize', 'equity_access'].includes(value.retirementTreatment) && value.retirementTreatmentAge == null) {
++    ctx.addIssue({
++      code: z.ZodIssueCode.custom,
++      path: ['retirementTreatmentAge'],
++      message: 'Enter the age for this property scenario'
++    });
++  }
+ });
+ 
++function normalizeInvestmentProfile(value) {
++  if (!retirementAccountTypes.has(value.accountType)) {
++    return { investmentStyle: null, expectedReturn: null, expectedVolatility: null };
++  }
++  const defaults = styleDefaults[value.investmentStyle] || styleDefaults.balanced;
++  return {
++    investmentStyle: value.investmentStyle,
++    expectedReturn: value.expectedReturn ?? defaults.expectedReturn,
++    expectedVolatility: value.expectedVolatility ?? defaults.expectedVolatility
++  };
++}
++
++function normalizePropertyProfile(value) {
++  if (value.accountType !== 'property') {
++    return {
++      isPrimaryResidence: false,
++      retirementTreatment: 'keep',
++      retirementTreatmentAge: null,
++      retirementCashRelease: null,
++      propertyGrowthRate: 0.03
++    };
++  }
++  return {
++    isPrimaryResidence: Boolean(value.isPrimaryResidence),
++    retirementTreatment: value.retirementTreatment || 'keep',
++    retirementTreatmentAge: value.retirementTreatmentAge ?? null,
++    retirementCashRelease: value.retirementCashRelease ?? null,
++    propertyGrowthRate: value.propertyGrowthRate ?? 0.03
++  };
++}
++
+ const liabilitySchema = z.object({
+   name: z.string().min(1).max(120),
+   institution: z.string().max(120).optional().nullable(),
+   liabilityType: z.enum(['mortgage', 'credit_card', 'student_loan', 'auto_loan', 'personal_loan', 'other']),
+   currentBalance: z.coerce.number().min(0),
+   interestRate: z.coerce.number().min(0).max(1).optional().nullable(),
+-  minimumPayment: z.coerce.number().min(0).optional().nullable()
++  minimumPayment: z.coerce.number().min(0).optional().nullable(),
++  monthlyPayment: z.coerce.number().min(0).optional().nullable(),
++  payoffAge: z.coerce.number().int().min(18).max(120).optional().nullable(),
++  linkedAccountId: z.string().uuid().optional().nullable()
+ });
+ 
+ accountsRouter.get('/', async (req, res, next) => {
+@@ -34,10 +103,24 @@ accountsRouter.get('/', async (req, res, next) => {
+ accountsRouter.post('/', async (req, res, next) => {
+   try {
+     const value = accountSchema.parse(req.body);
++    const profile = normalizeInvestmentProfile(value);
++    const property = normalizePropertyProfile(value);
+     const result = await pool.query(
+-      `INSERT INTO accounts (household_id, name, institution, account_type, current_balance, currency, last_verified_at)
+-       VALUES ($1, $2, $3, $4, $5, $6, now()) RETURNING *`,
+-      [req.householdId, value.name, value.institution || null, value.accountType, value.currentBalance, value.currency.toUpperCase()]
++      `INSERT INTO accounts
++        (household_id, name, institution, account_type, current_balance, currency,
++         investment_style, expected_return, expected_volatility,
++         is_primary_residence, retirement_treatment, retirement_treatment_age,
++         retirement_cash_release, property_growth_rate, last_verified_at)
++       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
++       RETURNING *`,
++      [
++        req.householdId, value.name, value.institution || null, value.accountType,
++        value.currentBalance, value.currency.toUpperCase(), profile.investmentStyle,
++        profile.expectedReturn, profile.expectedVolatility,
++        property.isPrimaryResidence, property.retirementTreatment,
++        property.retirementTreatmentAge, property.retirementCashRelease,
++        property.propertyGrowthRate
++      ]
+     );
+     res.status(201).json(result.rows[0]);
+   } catch (error) { next(error); }
+@@ -46,6 +129,8 @@ accountsRouter.post('/', async (req, res, next) => {
+ accountsRouter.put('/:id', async (req, res, next) => {
+   try {
+     const value = accountSchema.parse(req.body);
++    const profile = normalizeInvestmentProfile(value);
++    const property = normalizePropertyProfile(value);
+     const result = await pool.query(
+       `UPDATE accounts
+        SET name = $1,
+@@ -53,18 +138,25 @@ accountsRouter.put('/:id', async (req, res, next) => {
+            account_type = $3,
+            current_balance = $4,
+            currency = $5,
++           investment_style = $6,
++           expected_return = $7,
++           expected_volatility = $8,
++           is_primary_residence = $9,
++           retirement_treatment = $10,
++           retirement_treatment_age = $11,
++           retirement_cash_release = $12,
++           property_growth_rate = $13,
+            last_verified_at = now(),
+            updated_at = now()
+-       WHERE id = $6 AND household_id = $7
++       WHERE id = $14 AND household_id = $15
+        RETURNING *`,
+       [
+-        value.name,
+-        value.institution || null,
+-        value.accountType,
+-        value.currentBalance,
+-        value.currency.toUpperCase(),
+-        req.params.id,
+-        req.householdId
++        value.name, value.institution || null, value.accountType,
++        value.currentBalance, value.currency.toUpperCase(),
++        profile.investmentStyle, profile.expectedReturn, profile.expectedVolatility,
++        property.isPrimaryResidence, property.retirementTreatment,
++        property.retirementTreatmentAge, property.retirementCashRelease,
++        property.propertyGrowthRate, req.params.id, req.householdId
+       ]
+     );
+     if (!result.rowCount) return res.status(404).json({ error: 'Account not found' });
+@@ -84,9 +176,17 @@ accountsRouter.post('/liabilities', async (req, res, next) => {
+   try {
+     const value = liabilitySchema.parse(req.body);
+     const result = await pool.query(
+-      `INSERT INTO liabilities (household_id, name, institution, liability_type, current_balance, interest_rate, minimum_payment, last_verified_at)
+-       VALUES ($1, $2, $3, $4, $5, $6, $7, now()) RETURNING *`,
+-      [req.householdId, value.name, value.institution || null, value.liabilityType, value.currentBalance, value.interestRate || null, value.minimumPayment || null]
++      `INSERT INTO liabilities
++        (household_id, name, institution, liability_type, current_balance,
++         interest_rate, minimum_payment, monthly_payment, payoff_age,
++         linked_account_id, last_verified_at)
++       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now()) RETURNING *`,
++      [
++        req.householdId, value.name, value.institution || null, value.liabilityType,
++        value.currentBalance, value.interestRate ?? null, value.minimumPayment ?? null,
++        value.monthlyPayment ?? value.minimumPayment ?? null, value.payoffAge ?? null,
++        value.linkedAccountId || null
++      ]
+     );
+     res.status(201).json(result.rows[0]);
+   } catch (error) { next(error); }
+@@ -103,9 +203,12 @@ accountsRouter.put('/liabilities/:id', async (req, res, next) => {
+            current_balance = $4,
+            interest_rate = $5,
+            minimum_payment = $6,
++           monthly_payment = $7,
++           payoff_age = $8,
++           linked_account_id = $9,
+            last_verified_at = now(),
+            updated_at = now()
+-       WHERE id = $7 AND household_id = $8
++       WHERE id = $10 AND household_id = $11
+        RETURNING *`,
+       [
+         value.name,
+@@ -114,6 +217,9 @@ accountsRouter.put('/liabilities/:id', async (req, res, next) => {
+         value.currentBalance,
+         value.interestRate ?? null,
+         value.minimumPayment ?? null,
++        value.monthlyPayment ?? value.minimumPayment ?? null,
++        value.payoffAge ?? null,
++        value.linkedAccountId || null,
+         req.params.id,
+         req.householdId
+       ]
+diff --git a/server/routes/chat.js b/server/routes/chat.js
+index 0ec2ca9..e8faca0 100644
+--- a/server/routes/chat.js
++++ b/server/routes/chat.js
+@@ -2,6 +2,7 @@ import { Router } from 'express';
+ import { z } from 'zod';
+ import { pool } from '../db.js';
+ import { answerChat } from '../services/chat-service.js';
++import { calculateRetirementProjection } from '../services/retirement-service.js';
+ 
+ export const chatRouter = Router();
+ const chatSchema = z.object({
+@@ -13,12 +14,20 @@ function sum(rows, key) {
+   return rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
+ }
+ 
+-function buildHouseholdContext(accounts, liabilities, holdings, plan) {
+-  const accountRows = accounts.map((row) => ({ ...row, current_balance: Number(row.current_balance) || 0 }));
++function buildHouseholdContext(accounts, liabilities, holdings, plan, incomes, expenses, projection) {
++  const accountRows = accounts.map((row) => ({
++    ...row,
++    current_balance: Number(row.current_balance) || 0,
++    expected_return: row.expected_return == null ? null : Number(row.expected_return),
++    expected_volatility: row.expected_volatility == null ? null : Number(row.expected_volatility),
++    retirement_cash_release: row.retirement_cash_release == null ? null : Number(row.retirement_cash_release),
++    property_growth_rate: row.property_growth_rate == null ? null : Number(row.property_growth_rate)
++  }));
+   const liabilityRows = liabilities.map((row) => ({
+     ...row,
+     current_balance: Number(row.current_balance) || 0,
+-    interest_rate: row.interest_rate == null ? null : Number(row.interest_rate)
++    interest_rate: row.interest_rate == null ? null : Number(row.interest_rate),
++    monthly_payment: row.monthly_payment == null ? null : Number(row.monthly_payment)
+   }));
+   const holdingRows = holdings.map((row) => ({
+     ...row,
+@@ -52,7 +61,7 @@ function buildHouseholdContext(accounts, liabilities, holdings, plan) {
+     symbolMap.set(holding.symbol, existing);
+   }
+ 
+-  const investableTypes = new Set(['cash', 'brokerage', 'retirement', 'hsa', '529']);
++  const investableTypes = new Set(['cash', 'brokerage', 'ira', '401k', 'retirement', 'hsa']);
+   const totalAssets = sum(accountRows, 'current_balance');
+   const totalLiabilities = sum(liabilityRows, 'current_balance');
+   const investableAccountBalances = accountRows
+@@ -63,7 +72,7 @@ function buildHouseholdContext(accounts, liabilities, holdings, plan) {
+     .filter((row) => row.account_type === 'cash')
+     .reduce((total, row) => total + row.current_balance, 0);
+   const investmentAccountsOnly = accountRows
+-    .filter((row) => ['brokerage', 'retirement', 'hsa', '529'].includes(row.account_type))
++    .filter((row) => ['brokerage', 'ira', '401k', 'retirement', 'hsa'].includes(row.account_type))
+     .reduce((total, row) => total + row.current_balance, 0);
+   const unmodeledInvestmentAccountValue = investmentAccountsOnly - modeledHoldingsValue;
+ 
+@@ -90,20 +99,52 @@ function buildHouseholdContext(accounts, liabilities, holdings, plan) {
+       unmodeledInvestmentAccountValue
+     },
+     dataQualityNotes,
+-    retirementPlan: plan || null
++    retirementPlan: plan || null,
++    incomeStreams: incomes.map((row) => ({
++      ...row,
++      annual_amount: Number(row.annual_amount || 0),
++      inflation_rate: Number(row.inflation_rate || 0)
++    })),
++    expenses: expenses.map((row) => ({
++      ...row,
++      annual_amount: Number(row.annual_amount || 0),
++      post_retirement_annual_amount: row.post_retirement_annual_amount == null
++        ? null
++        : Number(row.post_retirement_annual_amount),
++      inflation_rate: Number(row.inflation_rate || 0)
++    })),
++    retirementProjection: projection ? {
++      selectedRetirementAge: projection.retirementAge,
++      earliestFeasibleAge: projection.earliestFeasibleAge,
++      successRatePct: projection.successRatePct,
++      successThresholdPct: projection.successThresholdPct,
++      readiness: projection.readiness,
++      monthlyExpensesAtRetirement: projection.monthlyExpensesAtRetirement,
++      monthlyIncomeAtRetirement: projection.monthlyIncomeAtRetirement,
++      medianPortfolioAtPlanEnd: projection.p50?.at(-1) || 0,
++      downsidePortfolioAtPlanEnd: projection.p10?.at(-1) || 0,
++      usesFallbackSpending: projection.dataCompleteness?.usesFallbackSpending || false,
++      assumptions: projection.assumptions
++    } : null
+   };
+ }
+ 
+ async function getHouseholdContext(householdId) {
+-  const [accounts, liabilities, holdings, plan] = await Promise.all([
++  const [accounts, liabilities, holdings, plan, incomes, expenses, projection] = await Promise.all([
+     pool.query(
+-      `SELECT id, name, institution, account_type, current_balance::float8 AS current_balance, last_verified_at
++      `SELECT id, name, institution, account_type, current_balance::float8 AS current_balance,
++              investment_style, expected_return::float8 AS expected_return,
++              expected_volatility::float8 AS expected_volatility,
++              is_primary_residence, retirement_treatment, retirement_treatment_age,
++              retirement_cash_release::float8 AS retirement_cash_release,
++              property_growth_rate::float8 AS property_growth_rate, last_verified_at
+        FROM accounts WHERE household_id = $1 ORDER BY current_balance DESC`,
+       [householdId]
+     ),
+     pool.query(
+       `SELECT id, name, institution, liability_type, current_balance::float8 AS current_balance,
+-              interest_rate::float8 AS interest_rate, last_verified_at
++              interest_rate::float8 AS interest_rate, monthly_payment::float8 AS monthly_payment,
++              payoff_age, linked_account_id, last_verified_at
+        FROM liabilities WHERE household_id = $1 ORDER BY current_balance DESC`,
+       [householdId]
+     ),
+@@ -125,9 +166,20 @@ async function getHouseholdContext(householdId) {
+        ORDER BY value DESC`,
+       [householdId]
+     ),
+-    pool.query('SELECT * FROM retirement_plans WHERE household_id = $1', [householdId])
++    pool.query('SELECT * FROM retirement_plans WHERE household_id = $1', [householdId]),
++    pool.query('SELECT * FROM income_streams WHERE household_id = $1 ORDER BY annual_amount DESC', [householdId]),
++    pool.query('SELECT * FROM expenses WHERE household_id = $1 ORDER BY annual_amount DESC', [householdId]),
++    calculateRetirementProjection(householdId, { simulationCount: 350, searchSimulationCount: 250 })
+   ]);
+-  return buildHouseholdContext(accounts.rows, liabilities.rows, holdings.rows, plan.rows[0] || null);
++  return buildHouseholdContext(
++    accounts.rows,
++    liabilities.rows,
++    holdings.rows,
++    plan.rows[0] || null,
++    incomes.rows,
++    expenses.rows,
++    projection
++  );
+ }
+ 
+ chatRouter.post('/', async (req, res, next) => {
+diff --git a/server/routes/dashboard.js b/server/routes/dashboard.js
+index 39e2a74..3cd826b 100644
+--- a/server/routes/dashboard.js
++++ b/server/routes/dashboard.js
+@@ -3,19 +3,37 @@ import { pool } from '../db.js';
+ 
+ export const dashboardRouter = Router();
+ 
++const INVESTABLE_TYPES = new Set(['cash', 'brokerage', 'ira', '401k', 'retirement', 'hsa']);
++
+ dashboardRouter.get('/summary', async (req, res, next) => {
+   try {
+     const householdId = req.householdId;
+     const [accountsResult, liabilitiesResult, holdingsResult, snapshotsResult, planResult] = await Promise.all([
+       pool.query(`
+-        SELECT id, name, institution, account_type, current_balance::float8 AS current_balance,
++        SELECT id, name, institution, account_type,
++               current_balance::float8 AS current_balance,
++               investment_style,
++               expected_return::float8 AS expected_return,
++               expected_volatility::float8 AS expected_volatility,
++               is_primary_residence,
++               retirement_treatment,
++               retirement_treatment_age,
++               retirement_cash_release::float8 AS retirement_cash_release,
++               property_growth_rate::float8 AS property_growth_rate,
+                is_manual, last_verified_at
+-        FROM accounts WHERE household_id = $1 ORDER BY current_balance DESC`, [householdId]),
++        FROM accounts
++        WHERE household_id = $1
++        ORDER BY current_balance DESC`, [householdId]),
+       pool.query(`
+-        SELECT id, name, institution, liability_type, current_balance::float8 AS current_balance,
+-               interest_rate::float8 AS interest_rate, minimum_payment::float8 AS minimum_payment,
+-               last_verified_at
+-        FROM liabilities WHERE household_id = $1 ORDER BY current_balance DESC`, [householdId]),
++        SELECT id, name, institution, liability_type,
++               current_balance::float8 AS current_balance,
++               interest_rate::float8 AS interest_rate,
++               minimum_payment::float8 AS minimum_payment,
++               monthly_payment::float8 AS monthly_payment,
++               payoff_age, linked_account_id, last_verified_at
++        FROM liabilities
++        WHERE household_id = $1
++        ORDER BY current_balance DESC`, [householdId]),
+       pool.query(`
+         SELECT h.symbol,
+                COALESCE(MAX(h.name), h.symbol) AS name,
+@@ -36,7 +54,7 @@ dashboardRouter.get('/summary', async (req, res, next) => {
+         FROM net_worth_snapshots
+         WHERE household_id = $1
+         ORDER BY snapshot_date`, [householdId]),
+-      pool.query(`SELECT * FROM retirement_plans WHERE household_id = $1`, [householdId])
++      pool.query('SELECT * FROM retirement_plans WHERE household_id = $1', [householdId])
+     ]);
+ 
+     const accounts = accountsResult.rows;
+@@ -45,12 +63,23 @@ dashboardRouter.get('/summary', async (req, res, next) => {
+     const assetsTotal = accounts.reduce((sum, row) => sum + Number(row.current_balance || 0), 0);
+     const liabilitiesTotal = liabilities.reduce((sum, row) => sum + Number(row.current_balance || 0), 0);
+     const netWorth = assetsTotal - liabilitiesTotal;
+-    const liquidPortfolio = accounts
+-      .filter((row) => ['cash', 'brokerage', 'retirement', 'hsa', '529'].includes(row.account_type))
++    const investableAssets = accounts
++      .filter((row) => INVESTABLE_TYPES.has(row.account_type))
++      .reduce((sum, row) => sum + Number(row.current_balance || 0), 0);
++    const primaryResidences = accounts
++      .filter((row) => row.account_type === 'property' && row.is_primary_residence);
++    const primaryResidenceIds = new Set(primaryResidences.map((row) => row.id));
++    const primaryResidenceValue = primaryResidences
++      .reduce((sum, row) => sum + Number(row.current_balance || 0), 0);
++    const mortgageBalance = liabilities
++      .filter((row) => row.liability_type === 'mortgage')
++      .filter((row) => primaryResidenceIds.has(row.linked_account_id)
++        || (primaryResidences.length === 1 && !row.linked_account_id))
+       .reduce((sum, row) => sum + Number(row.current_balance || 0), 0);
++    const homeEquity = Math.max(0, primaryResidenceValue - mortgageBalance);
+ 
+     const allocation = Object.entries(accounts.reduce((map, row) => {
+-      const label = row.account_type.replace('_', ' ');
++      const label = row.account_type.replaceAll('_', ' ');
+       map[label] = (map[label] || 0) + Number(row.current_balance || 0);
+       return map;
+     }, {})).map(([label, value]) => ({ label, value }));
+@@ -67,7 +96,11 @@ dashboardRouter.get('/summary', async (req, res, next) => {
+         assetsTotal,
+         liabilitiesTotal,
+         netWorth,
+-        liquidPortfolio,
++        investableAssets,
++        liquidPortfolio: investableAssets,
++        primaryResidenceValue,
++        mortgageBalance,
++        homeEquity,
+         accountCount: accounts.length,
+         holdingsCount: holdings.length
+       },
+diff --git a/server/routes/planning.js b/server/routes/planning.js
+new file mode 100644
+index 0000000..cf91b64
+--- /dev/null
++++ b/server/routes/planning.js
+@@ -0,0 +1,249 @@
++import { Router } from 'express';
++import { z } from 'zod';
++import { pool } from '../db.js';
++import { annualize, expenseAtAge, incomeAtAge } from '../services/retirement-cashflow-engine.js';
++import { buildDerivedLiabilityExpenses } from '../services/retirement-service.js';
++
++export const planningRouter = Router();
++
++const frequencySchema = z.enum(['weekly', 'biweekly', 'monthly', 'quarterly', 'annual']);
++
++const incomeSchema = z.object({
++  name: z.string().min(1).max(120),
++  incomeType: z.enum(['employment', 'social_security', 'pension', 'annuity', 'rental', 'part_time', 'other']),
++  amount: z.coerce.number().min(0),
++  frequency: frequencySchema.default('monthly'),
++  startAge: z.coerce.number().int().min(0).max(120).optional().nullable(),
++  endAge: z.coerce.number().int().min(0).max(120).optional().nullable(),
++  inflationRate: z.coerce.number().min(-0.1).max(0.2).default(0),
++  taxable: z.coerce.boolean().default(true),
++  endsAtRetirement: z.coerce.boolean().default(false),
++  notes: z.string().max(1000).optional().nullable()
++}).refine((value) => value.startAge == null || value.endAge == null || value.endAge >= value.startAge, {
++  message: 'End age must be at or after start age'
++});
++
++const expenseSchema = z.object({
++  name: z.string().min(1).max(120),
++  category: z.enum([
++    'housing', 'mortgage', 'property_tax', 'home_insurance', 'utilities',
++    'food', 'transportation', 'healthcare_premium', 'healthcare_out_of_pocket',
++    'travel', 'entertainment', 'education', 'family_support', 'insurance',
++    'debt_payment', 'taxes', 'other'
++  ]),
++  amount: z.coerce.number().min(0),
++  frequency: frequencySchema.default('monthly'),
++  retirementBehavior: z.enum(['same', 'ends', 'custom', 'starts']).default('same'),
++  postRetirementAmount: z.coerce.number().min(0).optional().nullable(),
++  postRetirementFrequency: frequencySchema.default('monthly'),
++  startAge: z.coerce.number().int().min(0).max(120).optional().nullable(),
++  endAge: z.coerce.number().int().min(0).max(120).optional().nullable(),
++  inflationRate: z.coerce.number().min(-0.1).max(0.2).default(0.025),
++  essential: z.coerce.boolean().default(true),
++  linkedLiabilityId: z.string().uuid().optional().nullable(),
++  notes: z.string().max(1000).optional().nullable()
++}).superRefine((value, ctx) => {
++  if (['custom', 'starts'].includes(value.retirementBehavior) && value.postRetirementAmount == null) {
++    ctx.addIssue({
++      code: z.ZodIssueCode.custom,
++      path: ['postRetirementAmount'],
++      message: 'Enter the post-retirement amount for this behavior'
++    });
++  }
++  if (value.startAge != null && value.endAge != null && value.endAge < value.startAge) {
++    ctx.addIssue({
++      code: z.ZodIssueCode.custom,
++      path: ['endAge'],
++      message: 'End age must be at or after start age'
++    });
++  }
++});
++
++function divisor(frequency) {
++  return { weekly: 52, biweekly: 26, monthly: 12, quarterly: 4, annual: 1 }[frequency] || 1;
++}
++
++function serializeIncome(row) {
++  return {
++    ...row,
++    annual_amount: Number(row.annual_amount || 0),
++    inflation_rate: Number(row.inflation_rate || 0),
++    amount: Number(row.annual_amount || 0) / divisor(row.frequency)
++  };
++}
++
++function serializeExpense(row) {
++  return {
++    ...row,
++    annual_amount: Number(row.annual_amount || 0),
++    post_retirement_annual_amount: row.post_retirement_annual_amount == null
++      ? null
++      : Number(row.post_retirement_annual_amount),
++    inflation_rate: Number(row.inflation_rate || 0),
++    amount: Number(row.annual_amount || 0) / divisor(row.frequency),
++    post_retirement_amount: row.post_retirement_annual_amount == null
++      ? null
++      : Number(row.post_retirement_annual_amount) / divisor(row.post_retirement_frequency)
++  };
++}
++
++planningRouter.get('/summary', async (req, res, next) => {
++  try {
++    const [planResult, incomeResult, expenseResult, liabilityResult] = await Promise.all([
++      pool.query('SELECT * FROM retirement_plans WHERE household_id = $1', [req.householdId]),
++      pool.query('SELECT * FROM income_streams WHERE household_id = $1 ORDER BY annual_amount DESC', [req.householdId]),
++      pool.query('SELECT * FROM expenses WHERE household_id = $1 ORDER BY annual_amount DESC', [req.householdId]),
++      pool.query(`SELECT id, household_id, name, liability_type,
++                         monthly_payment::float8 AS monthly_payment,
++                         payoff_age, linked_account_id
++                  FROM liabilities WHERE household_id = $1`, [req.householdId])
++    ]);
++    const plan = planResult.rows[0] || { current_age: 45, retirement_age: 65 };
++    const incomes = incomeResult.rows.map(serializeIncome);
++    const explicitExpenses = expenseResult.rows;
++    const derivedExpenses = buildDerivedLiabilityExpenses(liabilityResult.rows, explicitExpenses);
++    const expenses = [...explicitExpenses, ...derivedExpenses].map(serializeExpense);
++    const currentAge = Number(plan.current_age || 45);
++    const retirementAge = Number(plan.retirement_age || 65);
++
++    const currentAnnualIncome = incomes.reduce(
++      (sum, item) => sum + incomeAtAge(item, currentAge, currentAge, retirementAge).gross,
++      0
++    );
++    const currentAnnualExpenses = expenses.reduce(
++      (sum, item) => sum + expenseAtAge(item, currentAge, currentAge, retirementAge),
++      0
++    );
++    const retirementAnnualIncome = incomes.reduce(
++      (sum, item) => sum + incomeAtAge(item, retirementAge, currentAge, retirementAge).gross,
++      0
++    );
++    const retirementAnnualExpenses = expenses.reduce(
++      (sum, item) => sum + expenseAtAge(item, retirementAge, currentAge, retirementAge),
++      0
++    );
++
++    res.json({
++      incomes,
++      expenses,
++      metrics: {
++        currentMonthlyIncome: currentAnnualIncome / 12,
++        currentMonthlyExpenses: currentAnnualExpenses / 12,
++        currentMonthlySurplus: (currentAnnualIncome - currentAnnualExpenses) / 12,
++        retirementMonthlyIncome: retirementAnnualIncome / 12,
++        retirementMonthlyExpenses: retirementAnnualExpenses / 12,
++        retirementMonthlyGap: (retirementAnnualExpenses - retirementAnnualIncome) / 12
++      }
++    });
++  } catch (error) { next(error); }
++});
++
++planningRouter.post('/incomes', async (req, res, next) => {
++  try {
++    const value = incomeSchema.parse(req.body);
++    const result = await pool.query(`
++      INSERT INTO income_streams
++        (household_id, name, income_type, annual_amount, frequency, start_age, end_age,
++         inflation_rate, taxable, ends_at_retirement, notes, updated_at)
++      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())
++      RETURNING *`, [
++      req.householdId, value.name, value.incomeType,
++      annualize(value.amount, value.frequency), value.frequency,
++      value.startAge ?? null, value.endAge ?? null, value.inflationRate,
++      value.taxable, value.endsAtRetirement, value.notes || null
++    ]);
++    res.status(201).json(serializeIncome(result.rows[0]));
++  } catch (error) { next(error); }
++});
++
++planningRouter.put('/incomes/:id', async (req, res, next) => {
++  try {
++    const value = incomeSchema.parse(req.body);
++    const result = await pool.query(`
++      UPDATE income_streams
++      SET name=$1, income_type=$2, annual_amount=$3, frequency=$4,
++          start_age=$5, end_age=$6, inflation_rate=$7, taxable=$8,
++          ends_at_retirement=$9, notes=$10, updated_at=now()
++      WHERE id=$11 AND household_id=$12
++      RETURNING *`, [
++      value.name, value.incomeType, annualize(value.amount, value.frequency), value.frequency,
++      value.startAge ?? null, value.endAge ?? null, value.inflationRate,
++      value.taxable, value.endsAtRetirement, value.notes || null,
++      req.params.id, req.householdId
++    ]);
++    if (!result.rowCount) return res.status(404).json({ error: 'Income source not found' });
++    res.json(serializeIncome(result.rows[0]));
++  } catch (error) { next(error); }
++});
++
++planningRouter.delete('/incomes/:id', async (req, res, next) => {
++  try {
++    const result = await pool.query(
++      'DELETE FROM income_streams WHERE id=$1 AND household_id=$2 RETURNING id',
++      [req.params.id, req.householdId]
++    );
++    if (!result.rowCount) return res.status(404).json({ error: 'Income source not found' });
++    res.json({ ok: true });
++  } catch (error) { next(error); }
++});
++
++planningRouter.post('/expenses', async (req, res, next) => {
++  try {
++    const value = expenseSchema.parse(req.body);
++    const result = await pool.query(`
++      INSERT INTO expenses
++        (household_id, name, category, annual_amount, frequency,
++         post_retirement_annual_amount, post_retirement_frequency,
++         retirement_behavior, start_age, end_age, inflation_rate,
++         essential, linked_liability_id, notes, updated_at)
++      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
++      RETURNING *`, [
++      req.householdId, value.name, value.category,
++      annualize(value.amount, value.frequency), value.frequency,
++      value.postRetirementAmount == null
++        ? null
++        : annualize(value.postRetirementAmount, value.postRetirementFrequency),
++      value.postRetirementFrequency, value.retirementBehavior,
++      value.startAge ?? null, value.endAge ?? null, value.inflationRate,
++      value.essential, value.linkedLiabilityId || null, value.notes || null
++    ]);
++    res.status(201).json(serializeExpense(result.rows[0]));
++  } catch (error) { next(error); }
++});
++
++planningRouter.put('/expenses/:id', async (req, res, next) => {
++  try {
++    const value = expenseSchema.parse(req.body);
++    const result = await pool.query(`
++      UPDATE expenses
++      SET name=$1, category=$2, annual_amount=$3, frequency=$4,
++          post_retirement_annual_amount=$5, post_retirement_frequency=$6,
++          retirement_behavior=$7, start_age=$8, end_age=$9,
++          inflation_rate=$10, essential=$11, linked_liability_id=$12,
++          notes=$13, updated_at=now()
++      WHERE id=$14 AND household_id=$15
++      RETURNING *`, [
++      value.name, value.category, annualize(value.amount, value.frequency), value.frequency,
++      value.postRetirementAmount == null
++        ? null
++        : annualize(value.postRetirementAmount, value.postRetirementFrequency),
++      value.postRetirementFrequency, value.retirementBehavior,
++      value.startAge ?? null, value.endAge ?? null, value.inflationRate,
++      value.essential, value.linkedLiabilityId || null, value.notes || null,
++      req.params.id, req.householdId
++    ]);
++    if (!result.rowCount) return res.status(404).json({ error: 'Expense not found' });
++    res.json(serializeExpense(result.rows[0]));
++  } catch (error) { next(error); }
++});
++
++planningRouter.delete('/expenses/:id', async (req, res, next) => {
++  try {
++    const result = await pool.query(
++      'DELETE FROM expenses WHERE id=$1 AND household_id=$2 RETURNING id',
++      [req.params.id, req.householdId]
++    );
++    if (!result.rowCount) return res.status(404).json({ error: 'Expense not found' });
++    res.json({ ok: true });
++  } catch (error) { next(error); }
++});
+diff --git a/server/routes/retirement.js b/server/routes/retirement.js
+index 7d79d9b..4e9d5ea 100644
+--- a/server/routes/retirement.js
++++ b/server/routes/retirement.js
+@@ -1,7 +1,7 @@
+ import { Router } from 'express';
+ import { z } from 'zod';
+ import { pool } from '../db.js';
+-import { projectRetirement } from '../services/financial-engine.js';
++import { calculateRetirementProjection } from '../services/retirement-service.js';
+ 
+ export const retirementRouter = Router();
+ 
+@@ -13,34 +13,19 @@ const planSchema = z.object({
+   annualRetirementSpending: z.coerce.number().min(0),
+   expectedReturn: z.coerce.number().min(-0.5).max(0.5),
+   volatility: z.coerce.number().min(0).max(1),
+-  inflation: z.coerce.number().min(-0.02).max(0.2)
++  inflation: z.coerce.number().min(-0.02).max(0.2),
++  successThreshold: z.coerce.number().min(0.5).max(0.99).default(0.90),
++  maxSearchAge: z.coerce.number().int().min(40).max(95).default(75),
++  effectiveTaxRate: z.coerce.number().min(0).max(0.6).default(0.15)
+ }).refine((value) => value.retirementAge > value.currentAge, { message: 'Retirement age must exceed current age' })
+-  .refine((value) => value.planEndAge > value.retirementAge, { message: 'Plan end age must exceed retirement age' });
++  .refine((value) => value.planEndAge > value.retirementAge, { message: 'Plan end age must exceed retirement age' })
++  .refine((value) => value.maxSearchAge > value.currentAge, { message: 'Maximum search age must exceed current age' });
+ 
+ retirementRouter.get('/projection', async (req, res, next) => {
+   try {
+-    const [planResult, portfolioResult] = await Promise.all([
+-      pool.query('SELECT * FROM retirement_plans WHERE household_id = $1', [req.householdId]),
+-      pool.query(`
+-        SELECT COALESCE(SUM(current_balance), 0)::float8 AS total
+-        FROM accounts
+-        WHERE household_id = $1 AND account_type IN ('cash', 'brokerage', 'retirement', 'hsa', '529')`,
+-      [req.householdId])
+-    ]);
+-    const plan = planResult.rows[0];
+-    if (!plan) return res.status(404).json({ error: 'Retirement plan not found' });
+-    res.json(projectRetirement({
+-      currentAge: plan.current_age,
+-      retirementAge: plan.retirement_age,
+-      endAge: plan.plan_end_age,
+-      startingPortfolio: portfolioResult.rows[0].total,
+-      annualContribution: plan.annual_contribution,
+-      annualRetirementSpending: plan.annual_retirement_spending,
+-      expectedReturn: plan.expected_return,
+-      volatility: plan.volatility,
+-      inflation: plan.inflation,
+-      simulationCount: 1000
+-    }));
++    const projection = await calculateRetirementProjection(req.householdId);
++    if (!projection) return res.status(404).json({ error: 'Retirement plan not found' });
++    res.json(projection);
+   } catch (error) { next(error); }
+ });
+ 
+@@ -49,8 +34,11 @@ retirementRouter.put('/plan', async (req, res, next) => {
+     const value = planSchema.parse(req.body);
+     const result = await pool.query(`
+       INSERT INTO retirement_plans
+-        (household_id, current_age, retirement_age, plan_end_age, annual_contribution, annual_retirement_spending, expected_return, volatility, inflation, updated_at)
+-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
++        (household_id, current_age, retirement_age, plan_end_age,
++         annual_contribution, annual_retirement_spending,
++         expected_return, volatility, inflation,
++         success_threshold, max_search_age, effective_tax_rate, updated_at)
++      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now())
+       ON CONFLICT (household_id) DO UPDATE SET
+         current_age = EXCLUDED.current_age,
+         retirement_age = EXCLUDED.retirement_age,
+@@ -60,11 +48,16 @@ retirementRouter.put('/plan', async (req, res, next) => {
+         expected_return = EXCLUDED.expected_return,
+         volatility = EXCLUDED.volatility,
+         inflation = EXCLUDED.inflation,
++        success_threshold = EXCLUDED.success_threshold,
++        max_search_age = EXCLUDED.max_search_age,
++        effective_tax_rate = EXCLUDED.effective_tax_rate,
+         updated_at = now()
+-      RETURNING *`,
+-      [req.householdId, value.currentAge, value.retirementAge, value.planEndAge, value.annualContribution,
+-        value.annualRetirementSpending, value.expectedReturn, value.volatility, value.inflation]
+-    );
++      RETURNING *`, [
++      req.householdId, value.currentAge, value.retirementAge, value.planEndAge,
++      value.annualContribution, value.annualRetirementSpending,
++      value.expectedReturn, value.volatility, value.inflation,
++      value.successThreshold, value.maxSearchAge, value.effectiveTaxRate
++    ]);
+     res.json(result.rows[0]);
+   } catch (error) { next(error); }
+ });
+diff --git a/server/services/chat-service.js b/server/services/chat-service.js
+index 9b803b7..0ac388e 100644
+--- a/server/services/chat-service.js
++++ b/server/services/chat-service.js
+@@ -86,7 +86,11 @@ export async function answerChat({ message, householdContext }) {
+   const skills = await loadSkills(selectedSkills);
+   const systemPrompt = `You are Nirvana Research AI, an evidence-driven financial planning and equity-research system. Your quality standard is an investment-research briefing, not a generic chatbot answer.\n\n${skills}\n\nOperating policy:\n- Current date: ${new Date().toISOString().slice(0, 10)}.\n- Mode: ${config.ai.systemMode}.\n- Personalized recommendations allowed: ${config.ai.allowPersonalizedRecommendations}.\n- Trade execution allowed: ${config.ai.allowTradeExecution}.\n- Never claim to execute a trade or possess non-public information.\n- Use supplied structured market data for prices, returns, valuation metrics and portfolio calculations.
+ - When marketResearch.quant is present, incorporate its multi-horizon momentum, benchmark-relative returns, trend regime, volatility, drawdown, correlation and estimated beta. State when the quant signal confirms or conflicts with the fundamental thesis.\n- When marketResearch is present, answer the ticker question directly. Never start with “I can help,” a generic checklist, or a claim that current data is unavailable unless the packet itself records a failed source.\n- Distinguish company-specific performance from commodity, interest-rate, regulatory and sector-cycle exposure.\n- Use exact figures from the packet and identify their as-of dates. Do not invent figures.\n- Refer to supplied evidence with source IDs such as [M1], [M2], [N1]. Web-researched facts must be traceable to the web sources returned by the provider.\n- Treat analyst targets as third-party estimates, never as intrinsic value or guaranteed outcomes.
+-- Do not pretend that a single-stock trend diagnostic is a cross-sectional momentum backtest. Do not claim options mispricing without an options chain, pairs arbitrage without cointegration evidence, earnings-volatility edge without event/IV history, or order-book insight without Level II data.\n- Analyze available evidence before discussing missing data. Missing fields should not consume the answer unless they materially block a conclusion.\n- Use household.portfolioSummary and account-level holdings. Never compare aggregate holdings only with one brokerage account.\n- If the market provider is mock, explicitly state that the data is synthetic and do not form a real investment conclusion.\n- End with a research posture and the two or three facts that would change it.\n- Include a brief educational-use disclaimer, but do not bury the analysis beneath disclaimers.`;
++- Do not pretend that a single-stock trend diagnostic is a cross-sectional momentum backtest. Do not claim options mispricing without an options chain, pairs arbitrage without cointegration evidence, earnings-volatility edge without event/IV history, or order-book insight without Level II data.\n- Analyze available evidence before discussing missing data. Missing fields should not consume the answer unless they materially block a conclusion.\n- Use household.portfolioSummary and account-level holdings. Never compare aggregate holdings only with one brokerage account.
++- For retirement questions, use household.retirementProjection as the source of truth for success probability, earliest feasible age, cash-flow gaps, and ending portfolio ranges.
++- Keep total net worth separate from investable retirement assets. A primary residence with treatment 'keep' or 'undecided' is not available spending capital.
++- Use household.incomeStreams and household.expenses to explain pre- and post-retirement monthly cash flow. Never invent missing expense categories.
++- If retirementProjection.usesFallbackSpending is true, say that detailed expenses are incomplete and the plan-level spending fallback is driving the result.\n- If the market provider is mock, explicitly state that the data is synthetic and do not form a real investment conclusion.\n- End with a research posture and the two or three facts that would change it.\n- Include a brief educational-use disclaimer, but do not bury the analysis beneath disclaimers.`;
+ 
+   let aiResult;
+   try {
+diff --git a/server/services/retirement-cashflow-engine.js b/server/services/retirement-cashflow-engine.js
+new file mode 100644
+index 0000000..50aec48
+--- /dev/null
++++ b/server/services/retirement-cashflow-engine.js
+@@ -0,0 +1,379 @@
++function asNumber(value, fallback = 0) {
++  const parsed = Number(value);
++  return Number.isFinite(parsed) ? parsed : fallback;
++}
++
++function round(value, digits = 2) {
++  const multiplier = 10 ** digits;
++  return Math.round((value + Number.EPSILON) * multiplier) / multiplier;
++}
++
++function seededRandom(seed) {
++  let state = seed >>> 0;
++  return () => {
++    state = (1664525 * state + 1013904223) >>> 0;
++    return state / 4294967296;
++  };
++}
++
++function normalRandom(random) {
++  let u = 0;
++  let v = 0;
++  while (u === 0) u = random();
++  while (v === 0) v = random();
++  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
++}
++
++function percentile(sortedValues, p) {
++  if (!sortedValues.length) return 0;
++  const index = (sortedValues.length - 1) * p;
++  const lower = Math.floor(index);
++  const upper = Math.ceil(index);
++  if (lower === upper) return sortedValues[lower];
++  return sortedValues[lower] + (sortedValues[upper] - sortedValues[lower]) * (index - lower);
++}
++
++export function annualize(amount, frequency = 'annual') {
++  const value = Math.max(0, asNumber(amount));
++  const multipliers = {
++    weekly: 52,
++    biweekly: 26,
++    monthly: 12,
++    quarterly: 4,
++    annual: 1
++  };
++  return value * (multipliers[frequency] || 1);
++}
++
++function isActive(item, age) {
++  const startAge = item.start_age == null ? null : asNumber(item.start_age);
++  const endAge = item.end_age == null ? null : asNumber(item.end_age);
++  return (startAge == null || age >= startAge) && (endAge == null || age <= endAge);
++}
++
++function inflate(amount, rate, years) {
++  return amount * ((1 + asNumber(rate)) ** Math.max(0, years));
++}
++
++export function incomeAtAge(item, age, currentAge, retirementAge) {
++  if (!isActive(item, age)) return { gross: 0, taxable: 0, nonTaxable: 0 };
++  if (item.ends_at_retirement && age >= retirementAge) return { gross: 0, taxable: 0, nonTaxable: 0 };
++  const gross = inflate(asNumber(item.annual_amount), item.inflation_rate, age - currentAge);
++  return {
++    gross,
++    taxable: item.taxable === false ? 0 : gross,
++    nonTaxable: item.taxable === false ? gross : 0
++  };
++}
++
++export function expenseAtAge(item, age, currentAge, retirementAge) {
++  if (!isActive(item, age)) return 0;
++  const isRetired = age >= retirementAge;
++  let amount = asNumber(item.annual_amount);
++
++  if (isRetired) {
++    if (item.retirement_behavior === 'ends') return 0;
++    if (item.retirement_behavior === 'starts' || item.retirement_behavior === 'custom') {
++      amount = asNumber(item.post_retirement_annual_amount);
++    }
++  } else if (item.retirement_behavior === 'starts') {
++    return 0;
++  }
++
++  return inflate(amount, item.inflation_rate, age - currentAge);
++}
++
++function accountDefaults(type) {
++  const map = {
++    cash: { expectedReturn: 0.02, volatility: 0.01 },
++    brokerage: { expectedReturn: 0.07, volatility: 0.17 },
++    ira: { expectedReturn: 0.06, volatility: 0.12 },
++    '401k': { expectedReturn: 0.06, volatility: 0.12 },
++    retirement: { expectedReturn: 0.06, volatility: 0.12 },
++    hsa: { expectedReturn: 0.06, volatility: 0.12 },
++    '529': { expectedReturn: 0.055, volatility: 0.11 }
++  };
++  return map[type] || { expectedReturn: 0.05, volatility: 0.10 };
++}
++
++export function summarizeInvestableAccounts(accounts = [], plan = {}) {
++  const investableTypes = new Set(['cash', 'brokerage', 'ira', '401k', 'retirement', 'hsa']);
++  const rows = accounts.filter((account) => investableTypes.has(account.account_type));
++  const startingPortfolio = rows.reduce((sum, row) => sum + asNumber(row.current_balance), 0);
++
++  if (!startingPortfolio) {
++    return {
++      startingPortfolio: 0,
++      expectedReturn: asNumber(plan.expected_return, 0.065),
++      volatility: asNumber(plan.volatility, 0.14),
++      accounts: []
++    };
++  }
++
++  let weightedReturn = 0;
++  let weightedVolatility = 0;
++  const normalized = rows.map((row) => {
++    const balance = asNumber(row.current_balance);
++    const defaults = accountDefaults(row.account_type);
++    const expectedReturn = row.expected_return == null
++      ? defaults.expectedReturn
++      : asNumber(row.expected_return, defaults.expectedReturn);
++    const volatility = row.expected_volatility == null
++      ? defaults.volatility
++      : asNumber(row.expected_volatility, defaults.volatility);
++    weightedReturn += balance * expectedReturn;
++    weightedVolatility += balance * volatility;
++    return {
++      id: row.id,
++      name: row.name,
++      accountType: row.account_type,
++      balance: round(balance),
++      investmentStyle: row.investment_style || null,
++      expectedReturn,
++      volatility
++    };
++  });
++
++  return {
++    startingPortfolio: round(startingPortfolio),
++    expectedReturn: weightedReturn / startingPortfolio,
++    volatility: weightedVolatility / startingPortfolio,
++    accounts: normalized
++  };
++}
++
++function homeReleaseAtAge(properties, age, currentAge, retirementAge) {
++  let total = 0;
++  for (const property of properties) {
++    if (!property.is_primary_residence) continue;
++    const treatment = property.retirement_treatment || 'keep';
++    if (['keep', 'convert_to_rental', 'undecided'].includes(treatment)) continue;
++    const eventAge = treatment === 'sell_at_retirement'
++      ? retirementAge
++      : asNumber(property.retirement_treatment_age, retirementAge);
++    if (age !== eventAge) continue;
++    const release = asNumber(property.retirement_cash_release);
++    if (release <= 0) continue;
++    total += inflate(release, property.property_growth_rate, age - currentAge);
++  }
++  return total;
++}
++
++function buildYearCashflow({
++  age,
++  currentAge,
++  retirementAge,
++  incomes,
++  expenses,
++  annualContribution,
++  taxRate,
++  fallbackRetirementSpending,
++  fallbackInflation,
++  hasDetailedExpenses
++}) {
++  const income = incomes.reduce((total, item) => {
++    const result = incomeAtAge(item, age, currentAge, retirementAge);
++    total.gross += result.gross;
++    total.taxable += result.taxable;
++    total.nonTaxable += result.nonTaxable;
++    return total;
++  }, { gross: 0, taxable: 0, nonTaxable: 0 });
++
++  const expensesAnnual = hasDetailedExpenses
++    ? expenses.reduce((sum, item) => sum + expenseAtAge(item, age, currentAge, retirementAge), 0)
++    : (age >= retirementAge
++      ? inflate(fallbackRetirementSpending, fallbackInflation, age - retirementAge)
++      : 0);
++
++  const afterTaxIncome = income.nonTaxable + income.taxable * (1 - taxRate);
++  const contribution = age < retirementAge ? annualContribution : 0;
++  const householdCashFlow = afterTaxIncome - expensesAnnual - contribution;
++  const retirementCashFlow = afterTaxIncome - expensesAnnual;
++  const portfolioWithdrawal = age >= retirementAge && retirementCashFlow < 0
++    ? Math.abs(retirementCashFlow) / Math.max(0.01, 1 - taxRate)
++    : 0;
++  const portfolioInflow = age < retirementAge
++    ? contribution
++    : Math.max(0, retirementCashFlow);
++
++  return {
++    incomeGross: income.gross,
++    incomeAfterTax: afterTaxIncome,
++    expensesAnnual,
++    contribution,
++    portfolioWithdrawal,
++    portfolioInflow,
++    netCashFlow: householdCashFlow
++  };
++}
++
++function simulateCandidate(input, retirementAge, simulationCount, seed) {
++  const currentAge = Math.floor(asNumber(input.currentAge, 45));
++  const endAge = Math.max(retirementAge + 1, Math.floor(asNumber(input.endAge, 95)));
++  const taxRate = Math.min(0.6, Math.max(0, asNumber(input.effectiveTaxRate, 0.15)));
++  const annualContribution = Math.max(0, asNumber(input.annualContribution));
++  const expectedReturn = asNumber(input.expectedReturn, 0.065);
++  const volatility = Math.max(0, asNumber(input.volatility, 0.14));
++  const startingPortfolio = Math.max(0, asNumber(input.startingPortfolio));
++  const incomes = input.incomes || [];
++  const expenses = input.expenses || [];
++  const properties = input.properties || [];
++  const hasDetailedExpenses = expenses.length > 0;
++  const fallbackRetirementSpending = Math.max(0, asNumber(input.annualRetirementSpending));
++  const fallbackInflation = asNumber(input.inflation, 0.025);
++  const ages = [];
++  for (let age = currentAge; age <= endAge; age += 1) ages.push(age);
++
++  const deterministic = [];
++  const cashflowTimeline = [];
++  let deterministicBalance = startingPortfolio;
++  for (const age of ages) {
++    const cashflow = buildYearCashflow({
++      age,
++      currentAge,
++      retirementAge,
++      incomes,
++      expenses,
++      annualContribution,
++      taxRate,
++      fallbackRetirementSpending,
++      fallbackInflation,
++      hasDetailedExpenses
++    });
++    const homeRelease = homeReleaseAtAge(properties, age, currentAge, retirementAge);
++    deterministic.push(round(Math.max(0, deterministicBalance)));
++    cashflowTimeline.push({
++      age,
++      monthlyIncome: round(cashflow.incomeAfterTax / 12),
++      monthlyExpenses: round(cashflow.expensesAnnual / 12),
++      monthlyContribution: round(cashflow.contribution / 12),
++      monthlyPortfolioWithdrawal: round(cashflow.portfolioWithdrawal / 12),
++      monthlyNetCashFlow: round(cashflow.netCashFlow / 12),
++      homeEquityRelease: round(homeRelease)
++    });
++    deterministicBalance = deterministicBalance * (1 + expectedReturn)
++      + cashflow.portfolioInflow
++      + homeRelease
++      - cashflow.portfolioWithdrawal;
++    deterministicBalance = Math.max(0, deterministicBalance);
++  }
++
++  const balancesByYear = ages.map(() => []);
++  let successes = 0;
++  const random = seededRandom(seed);
++  for (let run = 0; run < simulationCount; run += 1) {
++    let balance = startingPortfolio;
++    let depletedAfterRetirement = false;
++    for (let index = 0; index < ages.length; index += 1) {
++      const age = ages[index];
++      balancesByYear[index].push(Math.max(0, balance));
++      const cashflow = buildYearCashflow({
++        age,
++        currentAge,
++        retirementAge,
++        incomes,
++        expenses,
++        annualContribution,
++        taxRate,
++        fallbackRetirementSpending,
++        fallbackInflation,
++        hasDetailedExpenses
++      });
++      const annualReturn = Math.max(-0.95, expectedReturn + volatility * normalRandom(random));
++      balance = balance * (1 + annualReturn)
++        + cashflow.portfolioInflow
++        + homeReleaseAtAge(properties, age, currentAge, retirementAge)
++        - cashflow.portfolioWithdrawal;
++      if (age >= retirementAge && balance <= 0) {
++        balance = 0;
++        depletedAfterRetirement = true;
++      }
++    }
++    if (!depletedAfterRetirement && balance > 0) successes += 1;
++  }
++
++  const p10 = [];
++  const p50 = [];
++  const p90 = [];
++  for (const values of balancesByYear) {
++    values.sort((a, b) => a - b);
++    p10.push(round(percentile(values, 0.10)));
++    p50.push(round(percentile(values, 0.50)));
++    p90.push(round(percentile(values, 0.90)));
++  }
++
++  return {
++    retirementAge,
++    successRatePct: round((successes / simulationCount) * 100, 1),
++    ages,
++    deterministic,
++    p10,
++    p50,
++    p90,
++    cashflowTimeline,
++    monthlyExpensesAtRetirement: cashflowTimeline.find((row) => row.age === retirementAge)?.monthlyExpenses || 0,
++    monthlyIncomeAtRetirement: cashflowTimeline.find((row) => row.age === retirementAge)?.monthlyIncome || 0
++  };
++}
++
++export function evaluateRetirementPlan(input) {
++  const currentAge = Math.max(18, Math.floor(asNumber(input.currentAge, 45)));
++  const selectedRetirementAge = Math.max(currentAge + 1, Math.floor(asNumber(input.retirementAge, 65)));
++  const endAge = Math.max(selectedRetirementAge + 1, Math.floor(asNumber(input.endAge, 95)));
++  const maxSearchAge = Math.min(endAge - 1, Math.max(selectedRetirementAge, Math.floor(asNumber(input.maxSearchAge, 75))));
++  const successThreshold = Math.min(0.99, Math.max(0.5, asNumber(input.successThreshold, 0.90)));
++  const simulationCount = Math.min(5000, Math.max(250, Math.floor(asNumber(input.simulationCount, 1000))));
++  const searchSimulationCount = Math.min(600, Math.max(250, Math.floor(asNumber(input.searchSimulationCount, 350))));
++
++  const selected = simulateCandidate(input, selectedRetirementAge, simulationCount, 20260712 + selectedRetirementAge);
++  const ageResults = [];
++  let earliestFeasibleAge = null;
++  for (let age = currentAge + 1; age <= maxSearchAge; age += 1) {
++    const result = age === selectedRetirementAge
++      ? selected
++      : simulateCandidate(input, age, searchSimulationCount, 20260712 + age);
++    ageResults.push({
++      retirementAge: age,
++      successRatePct: result.successRatePct,
++      medianAtEnd: result.p50.at(-1),
++      downsideAtEnd: result.p10.at(-1),
++      monthlyExpensesAtRetirement: result.monthlyExpensesAtRetirement,
++      monthlyIncomeAtRetirement: result.monthlyIncomeAtRetirement
++    });
++    if (earliestFeasibleAge == null && result.successRatePct >= successThreshold * 100) {
++      earliestFeasibleAge = age;
++    }
++  }
++
++  let readiness = 'Needs attention';
++  if (selected.successRatePct >= successThreshold * 100) readiness = 'On track';
++  else if (selected.successRatePct >= Math.max(65, successThreshold * 100 - 15)) readiness = 'Watch closely';
++
++  return {
++    ...selected,
++    readiness,
++    earliestFeasibleAge,
++    successThresholdPct: round(successThreshold * 100, 1),
++    ageResults,
++    inputs: {
++      currentAge,
++      retirementAge: selectedRetirementAge,
++      endAge,
++      startingPortfolio: round(input.startingPortfolio),
++      annualContribution: round(input.annualContribution),
++      annualRetirementSpending: round(input.annualRetirementSpending),
++      expectedReturn: input.expectedReturn,
++      volatility: input.volatility,
++      inflation: input.inflation,
++      effectiveTaxRate: input.effectiveTaxRate,
++      simulationCount
++    },
++    assumptions: [
++      'Primary-residence value is included in net worth but excluded from retirement funding unless a cash-release scenario is explicitly entered.',
++      'Detailed income and expense rows drive cash flow. The plan-level retirement spending amount is used only when no expenses have been saved.',
++      'Portfolio returns are modeled using the balance-weighted expected return and volatility of investable accounts.',
++      'Taxes are approximated using the effective tax rate. Detailed federal, state, Social Security, Medicare, and RMD tax rules are not yet modeled.',
++      'Monte Carlo results are hypothetical and are not guarantees.'
++    ]
++  };
++}
+diff --git a/server/services/retirement-service.js b/server/services/retirement-service.js
+new file mode 100644
+index 0000000..679afdc
+--- /dev/null
++++ b/server/services/retirement-service.js
+@@ -0,0 +1,134 @@
++import { pool } from '../db.js';
++import { evaluateRetirementPlan, summarizeInvestableAccounts } from './retirement-cashflow-engine.js';
++
++export function buildDerivedLiabilityExpenses(liabilities = [], explicitExpenses = []) {
++  const explicitlyLinked = new Set(
++    explicitExpenses.map((row) => row.linked_liability_id).filter(Boolean)
++  );
++  const hasUnlinkedMortgageExpense = explicitExpenses.some(
++    (row) => row.category === 'mortgage' && !row.linked_liability_id
++  );
++  return liabilities
++    .filter((row) => Number(row.monthly_payment || 0) > 0)
++    .filter((row) => !explicitlyLinked.has(row.id))
++    .filter((row) => !(row.liability_type === 'mortgage' && hasUnlinkedMortgageExpense))
++    .map((row) => ({
++      id: `liability:${row.id}`,
++      household_id: row.household_id,
++      name: `${row.name} payment`,
++      category: row.liability_type === 'mortgage' ? 'mortgage' : 'debt_payment',
++      annual_amount: Number(row.monthly_payment) * 12,
++      frequency: 'monthly',
++      post_retirement_annual_amount: null,
++      post_retirement_frequency: 'monthly',
++      retirement_behavior: 'same',
++      start_age: null,
++      end_age: row.payoff_age,
++      inflation_rate: 0,
++      essential: true,
++      linked_liability_id: row.id,
++      notes: `Derived from ${row.liability_type.replaceAll('_', ' ')} payment`,
++      derived_from_liability: true
++    }));
++}
++
++export async function loadRetirementData(householdId) {
++  const [planResult, accountsResult, incomeResult, expenseResult, liabilityResult] = await Promise.all([
++    pool.query('SELECT * FROM retirement_plans WHERE household_id = $1', [householdId]),
++    pool.query(`
++      SELECT id, name, institution, account_type,
++             current_balance::float8 AS current_balance,
++             investment_style,
++             expected_return::float8 AS expected_return,
++             expected_volatility::float8 AS expected_volatility,
++             is_primary_residence,
++             retirement_treatment,
++             retirement_treatment_age,
++             retirement_cash_release::float8 AS retirement_cash_release,
++             property_growth_rate::float8 AS property_growth_rate
++      FROM accounts
++      WHERE household_id = $1
++      ORDER BY current_balance DESC`, [householdId]),
++    pool.query(`
++      SELECT id, name, income_type, annual_amount::float8 AS annual_amount,
++             frequency, start_age, end_age,
++             inflation_rate::float8 AS inflation_rate,
++             taxable, ends_at_retirement, notes
++      FROM income_streams
++      WHERE household_id = $1
++      ORDER BY annual_amount DESC`, [householdId]),
++    pool.query(`
++      SELECT id, name, category, annual_amount::float8 AS annual_amount,
++             frequency,
++             post_retirement_annual_amount::float8 AS post_retirement_annual_amount,
++             post_retirement_frequency, retirement_behavior,
++             start_age, end_age, inflation_rate::float8 AS inflation_rate,
++             essential, linked_liability_id, notes
++      FROM expenses
++      WHERE household_id = $1
++      ORDER BY annual_amount DESC`, [householdId]),
++    pool.query(`
++      SELECT id, household_id, name, liability_type,
++             monthly_payment::float8 AS monthly_payment,
++             payoff_age, linked_account_id
++      FROM liabilities
++      WHERE household_id = $1`, [householdId])
++  ]);
++
++  const explicitExpenses = expenseResult.rows;
++  const derivedExpenses = buildDerivedLiabilityExpenses(liabilityResult.rows, explicitExpenses);
++  return {
++    plan: planResult.rows[0] || null,
++    accounts: accountsResult.rows,
++    incomes: incomeResult.rows,
++    expenses: [...explicitExpenses, ...derivedExpenses],
++    explicitExpenses,
++    derivedExpenses,
++    liabilities: liabilityResult.rows
++  };
++}
++
++export async function calculateRetirementProjection(householdId, options = {}) {
++  const data = await loadRetirementData(householdId);
++  if (!data.plan) return null;
++  const portfolio = summarizeInvestableAccounts(data.accounts, data.plan);
++  const properties = data.accounts.filter((row) => row.account_type === 'property');
++  const plan = data.plan;
++  const projection = evaluateRetirementPlan({
++    currentAge: plan.current_age,
++    retirementAge: plan.retirement_age,
++    endAge: plan.plan_end_age,
++    maxSearchAge: plan.max_search_age,
++    successThreshold: plan.success_threshold,
++    effectiveTaxRate: plan.effective_tax_rate,
++    startingPortfolio: portfolio.startingPortfolio,
++    annualContribution: plan.annual_contribution,
++    annualRetirementSpending: plan.annual_retirement_spending,
++    expectedReturn: portfolio.expectedReturn,
++    volatility: portfolio.volatility,
++    inflation: plan.inflation,
++    incomes: data.incomes,
++    expenses: data.expenses,
++    properties,
++    simulationCount: options.simulationCount || 1000,
++    searchSimulationCount: options.searchSimulationCount || 350
++  });
++
++  projection.accountGrowthModel = {
++    weightedExpectedReturn: portfolio.expectedReturn,
++    weightedVolatility: portfolio.volatility,
++    source: portfolio.accounts.length
++      ? 'Balance-weighted investable account profiles'
++      : 'Retirement plan default',
++    accounts: portfolio.accounts
++  };
++  projection.dataCompleteness = {
++    incomeCount: data.incomes.length,
++    expenseCount: data.expenses.length,
++    explicitExpenseCount: data.explicitExpenses.length,
++    derivedLiabilityExpenseCount: data.derivedExpenses.length,
++    hasPrimaryResidence: properties.some((row) => row.is_primary_residence),
++    usesFallbackSpending: data.expenses.length === 0
++  };
++  return projection;
++}
+diff --git a/server/skills/retirement-planner.md b/server/skills/retirement-planner.md
+index d45449d..d0748db 100644
+--- a/server/skills/retirement-planner.md
++++ b/server/skills/retirement-planner.md
+@@ -1,12 +1,24 @@
+ # Retirement Planner
+ 
+-You explain retirement projections produced by Nirvana's financial engine.
++You explain and interrogate retirement projections produced by Nirvana's deterministic cash-flow and Monte Carlo engine.
++
++## Required approach
++
++1. Start with the engine result: selected retirement age, success probability, earliest feasible retirement age, and the user's success threshold.
++2. Explain the cash-flow drivers: monthly expenses, non-portfolio income, portfolio withdrawals, mortgage/payoff timing, and home treatment.
++3. Separate total net worth from investable retirement assets. A primary residence is not spendable retirement capital unless the user explicitly entered a sale, downsizing, or equity-release scenario.
++4. Use the saved income and expense rows. Do not replace them with generic national averages when user data exists.
++5. Identify the two or three assumptions that most change the feasible retirement age.
++6. Compare adjacent retirement ages when useful; explain the tradeoff rather than issuing a single absolute date.
+ 
+ ## Guardrails
+ 
+ - The engine, not the language model, performs projection math.
+-- State the success rate, major assumptions, and major omissions.
++- Never count the primary home as available retirement funding under a `keep` or `undecided` treatment.
++- Do not subtract the mortgage balance from investable assets. Mortgage payments belong in cash flow; the mortgage balance belongs in net worth.
++- State when the plan is using fallback retirement spending because no detailed expenses were saved.
++- State the success rate, threshold, major assumptions, and important omissions.
+ - Do not present Monte Carlo results as guarantees.
+-- Phase 1 does not fully model taxes, Social Security, pensions, Medicare, long-term care, RMDs, or sequence-specific tax strategies.
+-- Suggest scenario changes such as retirement age, annual contributions, retirement spending, expected return, and volatility.
++- Taxes use an effective-rate approximation. Detailed federal, state, Social Security, Medicare, long-term-care, RMD, and account-withdrawal sequencing rules are not yet fully modeled.
++- Suggest concrete scenario levers such as retirement age, contributions, expense reductions, Social Security timing, mortgage payoff, part-time income, or a defined home-equity event.
+ - Never pressure a user to buy a financial product.
+diff --git a/tests/retirement-cashflow.test.js b/tests/retirement-cashflow.test.js
+new file mode 100644
+index 0000000..3e0b03f
+--- /dev/null
++++ b/tests/retirement-cashflow.test.js
+@@ -0,0 +1,104 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {
++  evaluateRetirementPlan,
++  expenseAtAge,
++  summarizeInvestableAccounts
++} from '../server/services/retirement-cashflow-engine.js';
++
++test('primary residence is excluded from investable retirement assets', () => {
++  const summary = summarizeInvestableAccounts([
++    { id: '1', name: '401k', account_type: '401k', current_balance: 500_000, expected_return: .08, expected_volatility: .18 },
++    { id: '2', name: 'Home', account_type: 'property', current_balance: 900_000, is_primary_residence: true },
++    { id: '3', name: 'Cash', account_type: 'cash', current_balance: 50_000 }
++  ], {});
++  assert.equal(summary.startingPortfolio, 550_000);
++  assert.equal(summary.accounts.length, 2);
++});
++
++test('expense behavior changes at retirement and respects payoff age', () => {
++  const mortgage = {
++    annual_amount: 48_000,
++    retirement_behavior: 'same',
++    start_age: 45,
++    end_age: 68,
++    inflation_rate: 0
++  };
++  const commuting = {
++    annual_amount: 12_000,
++    retirement_behavior: 'ends',
++    inflation_rate: 0
++  };
++  const travel = {
++    annual_amount: 10_000,
++    post_retirement_annual_amount: 18_000,
++    retirement_behavior: 'custom',
++    inflation_rate: 0
++  };
++  assert.equal(expenseAtAge(mortgage, 67, 50, 65), 48_000);
++  assert.equal(expenseAtAge(mortgage, 69, 50, 65), 0);
++  assert.equal(expenseAtAge(commuting, 64, 50, 65), 12_000);
++  assert.equal(expenseAtAge(commuting, 65, 50, 65), 0);
++  assert.equal(expenseAtAge(travel, 65, 50, 65), 18_000);
++});
++
++test('retirement engine returns an age comparison and cash-flow timeline', () => {
++  const result = evaluateRetirementPlan({
++    currentAge: 55,
++    retirementAge: 62,
++    endAge: 92,
++    maxSearchAge: 70,
++    successThreshold: .85,
++    effectiveTaxRate: .15,
++    startingPortfolio: 1_200_000,
++    annualContribution: 40_000,
++    annualRetirementSpending: 90_000,
++    expectedReturn: .065,
++    volatility: .12,
++    inflation: .025,
++    simulationCount: 250,
++    searchSimulationCount: 250,
++    incomes: [
++      { annual_amount: 180_000, income_type: 'employment', ends_at_retirement: true, taxable: true, inflation_rate: .02 },
++      { annual_amount: 42_000, income_type: 'social_security', start_age: 67, taxable: true, inflation_rate: .02 }
++    ],
++    expenses: [
++      { annual_amount: 84_000, retirement_behavior: 'same', inflation_rate: .025 },
++      { annual_amount: 18_000, retirement_behavior: 'ends', inflation_rate: .02 }
++    ],
++    properties: [
++      { is_primary_residence: true, retirement_treatment: 'keep', current_balance: 800_000 }
++    ]
++  });
++  assert.equal(result.retirementAge, 62);
++  assert.ok(result.ageResults.length > 1);
++  assert.equal(result.cashflowTimeline[0].age, 55);
++  assert.ok(result.monthlyExpensesAtRetirement > 0);
++  assert.ok(result.successRatePct >= 0 && result.successRatePct <= 100);
++});
++
++test('annual contributions are added before retirement even without income rows', () => {
++  const result = evaluateRetirementPlan({
++    currentAge: 50,
++    retirementAge: 52,
++    endAge: 55,
++    maxSearchAge: 52,
++    successThreshold: 0.8,
++    startingPortfolio: 100000,
++    annualContribution: 10000,
++    annualRetirementSpending: 0,
++    expectedReturn: 0,
++    volatility: 0,
++    inflation: 0,
++    effectiveTaxRate: 0,
++    incomes: [],
++    expenses: [],
++    properties: [],
++    simulationCount: 250,
++    searchSimulationCount: 250
++  });
++
++  assert.equal(result.deterministic[0], 100000);
++  assert.equal(result.deterministic[1], 110000);
++  assert.equal(result.deterministic[2], 120000);
++});
