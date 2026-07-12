@@ -4,7 +4,9 @@ const state = {
   settings: null,
   auth: null,
   threadId: null,
-  charts: {}
+  charts: {},
+  editingAccountId: null,
+  editingLiabilityId: null
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -197,21 +199,145 @@ function renderProjection() {
   }
 }
 
+function resetAccountEditor() {
+  state.editingAccountId = null;
+  const form = $('#accountForm');
+  form.reset();
+  $('#accountFormTitle').textContent = 'Add an asset';
+  $('#accountSubmitButton').textContent = 'Add account';
+  $('#accountCancelEdit').classList.add('hidden');
+}
+
+function resetLiabilityEditor() {
+  state.editingLiabilityId = null;
+  const form = $('#liabilityForm');
+  form.reset();
+  $('#liabilityFormTitle').textContent = 'Add a debt';
+  $('#liabilitySubmitButton').textContent = 'Add liability';
+  $('#liabilityCancelEdit').classList.add('hidden');
+}
+
+function editAccount(id) {
+  const account = state.summary.accounts.find((item) => item.id === id);
+  if (!account) return showAlert('Account could not be found.');
+  state.editingAccountId = id;
+  const form = $('#accountForm');
+  form.name.value = account.name || '';
+  form.institution.value = account.institution || '';
+  form.accountType.value = account.account_type;
+  form.currentBalance.value = account.current_balance ?? 0;
+  $('#accountFormTitle').textContent = 'Edit asset';
+  $('#accountSubmitButton').textContent = 'Save changes';
+  $('#accountCancelEdit').classList.remove('hidden');
+  switchView('accounts');
+  form.name.focus();
+}
+
+function editLiability(id) {
+  const liability = state.summary.liabilities.find((item) => item.id === id);
+  if (!liability) return showAlert('Liability could not be found.');
+  state.editingLiabilityId = id;
+  const form = $('#liabilityForm');
+  form.name.value = liability.name || '';
+  form.institution.value = liability.institution || '';
+  form.liabilityType.value = liability.liability_type;
+  form.currentBalance.value = liability.current_balance ?? 0;
+  form.interestRatePct.value = liability.interest_rate == null ? '' : Number(liability.interest_rate) * 100;
+  form.minimumPayment.value = liability.minimum_payment ?? '';
+  $('#liabilityFormTitle').textContent = 'Edit liability';
+  $('#liabilitySubmitButton').textContent = 'Save changes';
+  $('#liabilityCancelEdit').classList.remove('hidden');
+  switchView('accounts');
+  form.name.focus();
+}
+
+async function deleteAccount(id) {
+  const account = state.summary.accounts.find((item) => item.id === id);
+  if (!account) return;
+  const confirmed = window.confirm(
+    `Delete "${account.name}"? Any holdings imported into this account will also be permanently deleted.`
+  );
+  if (!confirmed) return;
+  await api(`/api/accounts/${id}`, { method: 'DELETE' });
+  if (state.editingAccountId === id) resetAccountEditor();
+  await loadDashboard();
+  showAlert('Asset deleted.');
+}
+
+async function deleteLiability(id) {
+  const liability = state.summary.liabilities.find((item) => item.id === id);
+  if (!liability) return;
+  if (!window.confirm(`Delete "${liability.name}"?`)) return;
+  await api(`/api/accounts/liabilities/${id}`, { method: 'DELETE' });
+  if (state.editingLiabilityId === id) resetLiabilityEditor();
+  await loadDashboard();
+  showAlert('Liability deleted.');
+}
+
 function renderAccounts() {
   const list = $('#accountsList');
   list.replaceChildren();
   const rows = [
-    ...state.summary.accounts.map((item) => ({ ...item, kind: item.account_type.replace('_', ' '), balance: item.current_balance, debt: false })),
-    ...state.summary.liabilities.map((item) => ({ ...item, kind: item.liability_type.replace('_', ' '), balance: item.current_balance, debt: true }))
+    ...state.summary.accounts.map((item) => ({
+      ...item,
+      kind: item.account_type.replaceAll('_', ' '),
+      balance: item.current_balance,
+      debt: false
+    })),
+    ...state.summary.liabilities.map((item) => ({
+      ...item,
+      kind: item.liability_type.replaceAll('_', ' '),
+      balance: item.current_balance,
+      debt: true
+    }))
   ];
   if (!rows.length) {
     list.innerHTML = '<div class="empty-inline">Add your first account or liability.</div>';
     return;
   }
+
   rows.forEach((row) => {
     const item = document.createElement('div');
     item.className = 'account-row';
-    item.innerHTML = `<div><span><strong>${escapeHtml(row.name)}</strong></span><small>${escapeHtml(row.institution || 'Manual')} · ${escapeHtml(row.kind)}</small></div><strong>${row.debt ? '−' : ''}${money.format(row.balance)}</strong>`;
+
+    const details = document.createElement('div');
+    details.className = 'account-row-details';
+    details.innerHTML = `<span><strong>${escapeHtml(row.name)}</strong></span><small>${escapeHtml(row.institution || 'Manual')} · ${escapeHtml(row.kind)}</small>`;
+
+    const trailing = document.createElement('div');
+    trailing.className = 'account-row-trailing';
+
+    const balance = document.createElement('strong');
+    balance.className = row.debt ? 'debt-balance' : '';
+    balance.textContent = `${row.debt ? '−' : ''}${money.format(row.balance)}`;
+
+    const actions = document.createElement('div');
+    actions.className = 'row-actions';
+
+    const editButton = document.createElement('button');
+    editButton.type = 'button';
+    editButton.className = 'row-action';
+    editButton.textContent = 'Edit';
+    editButton.setAttribute('aria-label', `Edit ${row.name}`);
+    editButton.addEventListener('click', () => row.debt ? editLiability(row.id) : editAccount(row.id));
+
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'row-action danger';
+    deleteButton.textContent = 'Delete';
+    deleteButton.setAttribute('aria-label', `Delete ${row.name}`);
+    deleteButton.addEventListener('click', async () => {
+      try {
+        if (row.debt) await deleteLiability(row.id);
+        else await deleteAccount(row.id);
+      } catch (error) {
+        showAlert(error.message);
+      }
+    });
+
+    actions.append(editButton, deleteButton);
+    trailing.append(balance, actions);
+    item.append(details, trailing);
     list.append(item);
   });
 }
@@ -405,11 +531,21 @@ async function initialize() {
     const button = event.submitter;
     button.disabled = true;
     try {
-      await api('/api/accounts', { method: 'POST', body: JSON.stringify(formObject(form)) });
-      form.reset();
+      const editing = Boolean(state.editingAccountId);
+      await api(
+        editing ? `/api/accounts/${state.editingAccountId}` : '/api/accounts',
+        {
+          method: editing ? 'PUT' : 'POST',
+          body: JSON.stringify(formObject(form))
+        }
+      );
+      resetAccountEditor();
       await loadDashboard();
+      showAlert(editing ? 'Asset updated.' : 'Asset added.');
     } catch (error) { showAlert(error.message); } finally { button.disabled = false; }
   });
+
+  $('#accountCancelEdit').addEventListener('click', resetAccountEditor);
 
   $('#liabilityForm').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -417,16 +553,28 @@ async function initialize() {
     const button = event.submitter;
     button.disabled = true;
     try {
+      const editing = Boolean(state.editingLiabilityId);
       const values = formObject(form);
       const payload = { ...values };
       delete payload.interestRatePct;
-      if (values.interestRatePct) payload.interestRate = Number(values.interestRatePct) / 100;
+      if (values.interestRatePct !== '') payload.interestRate = Number(values.interestRatePct) / 100;
+      else delete payload.interestRate;
       if (!payload.minimumPayment) delete payload.minimumPayment;
-      await api('/api/accounts/liabilities', { method: 'POST', body: JSON.stringify(payload) });
-      form.reset();
+
+      await api(
+        editing ? `/api/accounts/liabilities/${state.editingLiabilityId}` : '/api/accounts/liabilities',
+        {
+          method: editing ? 'PUT' : 'POST',
+          body: JSON.stringify(payload)
+        }
+      );
+      resetLiabilityEditor();
       await loadDashboard();
+      showAlert(editing ? 'Liability updated.' : 'Liability added.');
     } catch (error) { showAlert(error.message); } finally { button.disabled = false; }
   });
+
+  $('#liabilityCancelEdit').addEventListener('click', resetLiabilityEditor);
 
   $('#csvForm').addEventListener('submit', async (event) => {
     event.preventDefault();

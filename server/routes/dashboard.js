@@ -12,7 +12,7 @@ dashboardRouter.get('/summary', async (req, res, next) => {
                is_manual, last_verified_at
         FROM accounts WHERE household_id = $1 ORDER BY current_balance DESC`, [householdId]),
       pool.query(`
-        SELECT id, name, liability_type, current_balance::float8 AS current_balance,
+        SELECT id, name, institution, liability_type, current_balance::float8 AS current_balance,
                interest_rate::float8 AS interest_rate, minimum_payment::float8 AS minimum_payment,
                last_verified_at
         FROM liabilities WHERE household_id = $1 ORDER BY current_balance DESC`, [householdId]),

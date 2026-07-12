@@ -183,3 +183,58 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .source-item a, .source-item strong { display: block; color: var(--accent-dark); font-weight: 800; text-decoration: none; line-height: 1.35; }
 .source-item a:hover { text-decoration: underline; }
 .source-item small { display: block; margin-top: .18rem; color: var(--ink-soft); line-height: 1.35; }
+
+/* Account and liability edit/delete controls */
+.account-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+}
+.account-row-details { min-width: 0; }
+.account-row-trailing {
+  display: grid;
+  justify-items: end;
+  gap: .45rem;
+}
+.account-row-trailing > strong {
+  white-space: nowrap;
+}
+.row-actions {
+  display: flex;
+  gap: .35rem;
+}
+.row-action {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-soft);
+  border-radius: 8px;
+  padding: .3rem .55rem;
+  font: inherit;
+  font-size: .78rem;
+  cursor: pointer;
+}
+.row-action:hover {
+  color: var(--ink);
+  border-color: var(--ink-soft);
+}
+.row-action.danger {
+  color: #9b2c2c;
+}
+.row-action.danger:hover {
+  border-color: #9b2c2c;
+  background: #fff5f5;
+}
+.form-actions {
+  display: flex;
+  gap: .65rem;
+  flex-wrap: wrap;
+}
+.debt-balance { color: #9b2c2c; }
+
+@media (max-width: 620px) {
+  .account-row {
+    grid-template-columns: 1fr;
+  }
+  .account-row-trailing {
+    justify-items: start;
+  }
+}

@@ -43,6 +43,35 @@ accountsRouter.post('/', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+accountsRouter.put('/:id', async (req, res, next) => {
+  try {
+    const value = accountSchema.parse(req.body);
+    const result = await pool.query(
+      `UPDATE accounts
+       SET name = $1,
+           institution = $2,
+           account_type = $3,
+           current_balance = $4,
+           currency = $5,
+           last_verified_at = now(),
+           updated_at = now()
+       WHERE id = $6 AND household_id = $7
+       RETURNING *`,
+      [
+        value.name,
+        value.institution || null,
+        value.accountType,
+        value.currentBalance,
+        value.currency.toUpperCase(),
+        req.params.id,
+        req.householdId
+      ]
+    );
+    if (!result.rowCount) return res.status(404).json({ error: 'Account not found' });
+    res.json(result.rows[0]);
+  } catch (error) { next(error); }
+});
+
 accountsRouter.delete('/:id', async (req, res, next) => {
   try {
     const result = await pool.query('DELETE FROM accounts WHERE id = $1 AND household_id = $2 RETURNING id', [req.params.id, req.householdId]);
@@ -60,6 +89,48 @@ accountsRouter.post('/liabilities', async (req, res, next) => {
       [req.householdId, value.name, value.institution || null, value.liabilityType, value.currentBalance, value.interestRate || null, value.minimumPayment || null]
     );
     res.status(201).json(result.rows[0]);
+  } catch (error) { next(error); }
+});
+
+accountsRouter.put('/liabilities/:id', async (req, res, next) => {
+  try {
+    const value = liabilitySchema.parse(req.body);
+    const result = await pool.query(
+      `UPDATE liabilities
+       SET name = $1,
+           institution = $2,
+           liability_type = $3,
+           current_balance = $4,
+           interest_rate = $5,
+           minimum_payment = $6,
+           last_verified_at = now(),
+           updated_at = now()
+       WHERE id = $7 AND household_id = $8
+       RETURNING *`,
+      [
+        value.name,
+        value.institution || null,
+        value.liabilityType,
+        value.currentBalance,
+        value.interestRate ?? null,
+        value.minimumPayment ?? null,
+        req.params.id,
+        req.householdId
+      ]
+    );
+    if (!result.rowCount) return res.status(404).json({ error: 'Liability not found' });
+    res.json(result.rows[0]);
+  } catch (error) { next(error); }
+});
+
+accountsRouter.delete('/liabilities/:id', async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM liabilities WHERE id = $1 AND household_id = $2 RETURNING id',
+      [req.params.id, req.householdId]
+    );
+    if (!result.rowCount) return res.status(404).json({ error: 'Liability not found' });
+    res.json({ ok: true });
   } catch (error) { next(error); }
 });
 
