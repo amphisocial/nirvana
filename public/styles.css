@@ -238,3 +238,213 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
     justify-items: start;
   }
 }
+
+/* Retirement account profiles + persistent AI planner */
+:root {
+  --nirvana-deep: #073e46;
+  --nirvana-teal: #087f73;
+  --nirvana-mint: #dff5eb;
+  --nirvana-green: #05a66a;
+  --nirvana-canvas: #f7faf8;
+}
+.app-body { background: var(--nirvana-canvas); }
+.sidebar { background: var(--nirvana-deep); }
+.metric-featured, .button-primary, .user-message { background: var(--nirvana-deep); }
+.panel, .metric-card { box-shadow: 0 8px 30px rgba(7,62,70,.055); border-color: #dce7e2; }
+.panel { border-radius: 16px; }
+.metric-card { border-radius: 16px; }
+.panel-kicker, .eyebrow { color: var(--nirvana-teal); }
+.button-primary { border-radius: 9px; }
+.assistant-toggle {
+  border: 1px solid #c9ddd6;
+  background: white;
+  color: var(--nirvana-deep);
+  border-radius: 999px;
+  padding: .62rem .9rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.investment-profile {
+  border: 1px solid #cce4da;
+  background: linear-gradient(145deg, #f4fbf7, #e9f7f0);
+  border-radius: 14px;
+  padding: 1rem;
+  display: grid;
+  gap: .85rem;
+}
+.profile-intro strong, .profile-intro small { display: block; }
+.profile-intro small { color: var(--ink-soft); margin-top: .2rem; }
+
+.assistant-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 55;
+  width: 54px;
+  height: 54px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--nirvana-deep);
+  color: white;
+  font-size: 1.35rem;
+  box-shadow: 0 14px 38px rgba(7,62,70,.28);
+  cursor: pointer;
+}
+.assistant-drawer {
+  position: fixed;
+  z-index: 60;
+  top: 0;
+  right: 0;
+  width: min(390px, 94vw);
+  height: 100vh;
+  background: #fffdfa;
+  border-left: 1px solid #dce7e2;
+  box-shadow: -20px 0 55px rgba(7,62,70,.12);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(105%);
+  transition: transform .24s ease;
+}
+.assistant-drawer.open { transform: translateX(0); }
+.assistant-drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  border-bottom: 1px solid #e3ebe7;
+  padding-bottom: .9rem;
+}
+.assistant-drawer-head h2 {
+  margin: 0;
+  font-family: Georgia, serif;
+  color: var(--nirvana-deep);
+}
+.assistant-welcome {
+  color: var(--ink-soft);
+  font-size: .86rem;
+  margin: 1rem 0;
+}
+.assistant-suggestions {
+  display: grid;
+  gap: .45rem;
+  margin-bottom: .8rem;
+}
+.assistant-suggestions button {
+  text-align: left;
+  border: 1px solid #d7e3df;
+  background: white;
+  color: var(--nirvana-deep);
+  border-radius: 8px;
+  padding: .58rem .7rem;
+  cursor: pointer;
+  font-size: .8rem;
+}
+.assistant-suggestions button:hover { border-color: var(--nirvana-teal); }
+.assistant-messages {
+  flex: 1;
+  overflow-y: auto;
+  background: #f8faf8;
+  border: 1px solid #e1e9e5;
+  border-radius: 12px;
+  padding: .5rem;
+}
+.assistant-messages .message { max-width: 94%; font-size: .86rem; }
+.assistant-input {
+  margin-top: .75rem;
+  display: grid;
+  grid-template-columns: 1fr 42px;
+  gap: .45rem;
+  align-items: end;
+  border: 1px solid #d8e3de;
+  background: white;
+  border-radius: 12px;
+  padding: .45rem;
+}
+.assistant-input textarea {
+  border: 0;
+  box-shadow: none;
+  resize: none;
+}
+.assistant-send {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--nirvana-deep);
+  color: white;
+  cursor: pointer;
+}
+.assistant-disclaimer {
+  color: var(--ink-soft);
+  font-size: .68rem;
+  margin: .5rem 0 0;
+  text-align: center;
+}
+@media (min-width: 1500px) {
+  .assistant-drawer.open ~ * {}
+  body.assistant-open .app-main { margin-right: 390px; transition: margin-right .24s ease; }
+}
+@media (max-width: 760px) {
+  .assistant-toggle { display: none; }
+  .assistant-drawer { width: 100vw; }
+}
+
+/* Retirement cash-flow planner */
+.metric-grid-five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.retirement-metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.stack-form label > small { color: var(--ink-soft); font-weight: 500; line-height: 1.35; }
+.check-label {
+  display: flex !important;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: .55rem !important;
+  min-height: 42px;
+  padding: .65rem .75rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+}
+.check-label input { width: auto; margin: 0; }
+.cashflow-list { display: grid; gap: .2rem; }
+.cashflow-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: center;
+  padding: .85rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.cashflow-row > div:first-child { min-width: 0; }
+.cashflow-row strong, .cashflow-row small { display: block; }
+.cashflow-row small { color: var(--ink-soft); margin-top: .18rem; text-transform: capitalize; }
+.cashflow-row-trailing { display: grid; justify-items: end; gap: .45rem; }
+.cashflow-row-trailing > strong { white-space: nowrap; font-family: Georgia, serif; }
+.retirement-age-table { max-height: 390px; overflow-y: auto; }
+.feasible-row { background: #eaf8f1; }
+.feasible-row td { color: var(--nirvana-deep); }
+#propertyReleaseFields { display: grid; gap: .85rem; }
+#propertyReleaseFields.hidden { display: none !important; }
+#postRetirementExpenseFields.hidden { display: none !important; }
+
+@media (max-width: 1320px) {
+  .metric-grid-five { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .retirement-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .metric-grid-five, .retirement-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 620px) {
+  .metric-grid-five, .retirement-metric-grid { grid-template-columns: 1fr; }
+  .cashflow-row { grid-template-columns: 1fr; }
+  .cashflow-row-trailing { justify-items: start; }
+}
+.derived-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: .28rem .55rem;
+  border-radius: 999px;
+  background: var(--accent-pale);
+  color: var(--accent-dark);
+  font-size: .7rem;
+  font-weight: 800;
+}

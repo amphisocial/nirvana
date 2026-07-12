@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { pool } from '../db.js';
 import { answerChat } from '../services/chat-service.js';
+import { calculateRetirementProjection } from '../services/retirement-service.js';
 
 export const chatRouter = Router();
 const chatSchema = z.object({
@@ -13,12 +14,20 @@ function sum(rows, key) {
   return rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
 }
 
-function buildHouseholdContext(accounts, liabilities, holdings, plan) {
-  const accountRows = accounts.map((row) => ({ ...row, current_balance: Number(row.current_balance) || 0 }));
+function buildHouseholdContext(accounts, liabilities, holdings, plan, incomes, expenses, projection) {
+  const accountRows = accounts.map((row) => ({
+    ...row,
+    current_balance: Number(row.current_balance) || 0,
+    expected_return: row.expected_return == null ? null : Number(row.expected_return),
+    expected_volatility: row.expected_volatility == null ? null : Number(row.expected_volatility),
+    retirement_cash_release: row.retirement_cash_release == null ? null : Number(row.retirement_cash_release),
+    property_growth_rate: row.property_growth_rate == null ? null : Number(row.property_growth_rate)
+  }));
   const liabilityRows = liabilities.map((row) => ({
     ...row,
     current_balance: Number(row.current_balance) || 0,
-    interest_rate: row.interest_rate == null ? null : Number(row.interest_rate)
+    interest_rate: row.interest_rate == null ? null : Number(row.interest_rate),
+    monthly_payment: row.monthly_payment == null ? null : Number(row.monthly_payment)
   }));
   const holdingRows = holdings.map((row) => ({
     ...row,
@@ -52,7 +61,7 @@ function buildHouseholdContext(accounts, liabilities, holdings, plan) {
     symbolMap.set(holding.symbol, existing);
   }
 
-  const investableTypes = new Set(['cash', 'brokerage', 'retirement', 'hsa', '529']);
+  const investableTypes = new Set(['cash', 'brokerage', 'ira', '401k', 'retirement', 'hsa']);
   const totalAssets = sum(accountRows, 'current_balance');
   const totalLiabilities = sum(liabilityRows, 'current_balance');
   const investableAccountBalances = accountRows
@@ -63,7 +72,7 @@ function buildHouseholdContext(accounts, liabilities, holdings, plan) {
     .filter((row) => row.account_type === 'cash')
     .reduce((total, row) => total + row.current_balance, 0);
   const investmentAccountsOnly = accountRows
-    .filter((row) => ['brokerage', 'retirement', 'hsa', '529'].includes(row.account_type))
+    .filter((row) => ['brokerage', 'ira', '401k', 'retirement', 'hsa'].includes(row.account_type))
     .reduce((total, row) => total + row.current_balance, 0);
   const unmodeledInvestmentAccountValue = investmentAccountsOnly - modeledHoldingsValue;
 
@@ -90,20 +99,52 @@ function buildHouseholdContext(accounts, liabilities, holdings, plan) {
       unmodeledInvestmentAccountValue
     },
     dataQualityNotes,
-    retirementPlan: plan || null
+    retirementPlan: plan || null,
+    incomeStreams: incomes.map((row) => ({
+      ...row,
+      annual_amount: Number(row.annual_amount || 0),
+      inflation_rate: Number(row.inflation_rate || 0)
+    })),
+    expenses: expenses.map((row) => ({
+      ...row,
+      annual_amount: Number(row.annual_amount || 0),
+      post_retirement_annual_amount: row.post_retirement_annual_amount == null
+        ? null
+        : Number(row.post_retirement_annual_amount),
+      inflation_rate: Number(row.inflation_rate || 0)
+    })),
+    retirementProjection: projection ? {
+      selectedRetirementAge: projection.retirementAge,
+      earliestFeasibleAge: projection.earliestFeasibleAge,
+      successRatePct: projection.successRatePct,
+      successThresholdPct: projection.successThresholdPct,
+      readiness: projection.readiness,
+      monthlyExpensesAtRetirement: projection.monthlyExpensesAtRetirement,
+      monthlyIncomeAtRetirement: projection.monthlyIncomeAtRetirement,
+      medianPortfolioAtPlanEnd: projection.p50?.at(-1) || 0,
+      downsidePortfolioAtPlanEnd: projection.p10?.at(-1) || 0,
+      usesFallbackSpending: projection.dataCompleteness?.usesFallbackSpending || false,
+      assumptions: projection.assumptions
+    } : null
   };
 }
 
 async function getHouseholdContext(householdId) {
-  const [accounts, liabilities, holdings, plan] = await Promise.all([
+  const [accounts, liabilities, holdings, plan, incomes, expenses, projection] = await Promise.all([
     pool.query(
-      `SELECT id, name, institution, account_type, current_balance::float8 AS current_balance, last_verified_at
+      `SELECT id, name, institution, account_type, current_balance::float8 AS current_balance,
+              investment_style, expected_return::float8 AS expected_return,
+              expected_volatility::float8 AS expected_volatility,
+              is_primary_residence, retirement_treatment, retirement_treatment_age,
+              retirement_cash_release::float8 AS retirement_cash_release,
+              property_growth_rate::float8 AS property_growth_rate, last_verified_at
        FROM accounts WHERE household_id = $1 ORDER BY current_balance DESC`,
       [householdId]
     ),
     pool.query(
       `SELECT id, name, institution, liability_type, current_balance::float8 AS current_balance,
-              interest_rate::float8 AS interest_rate, last_verified_at
+              interest_rate::float8 AS interest_rate, monthly_payment::float8 AS monthly_payment,
+              payoff_age, linked_account_id, last_verified_at
        FROM liabilities WHERE household_id = $1 ORDER BY current_balance DESC`,
       [householdId]
     ),
@@ -125,9 +166,20 @@ async function getHouseholdContext(householdId) {
        ORDER BY value DESC`,
       [householdId]
     ),
-    pool.query('SELECT * FROM retirement_plans WHERE household_id = $1', [householdId])
+    pool.query('SELECT * FROM retirement_plans WHERE household_id = $1', [householdId]),
+    pool.query('SELECT * FROM income_streams WHERE household_id = $1 ORDER BY annual_amount DESC', [householdId]),
+    pool.query('SELECT * FROM expenses WHERE household_id = $1 ORDER BY annual_amount DESC', [householdId]),
+    calculateRetirementProjection(householdId, { simulationCount: 350, searchSimulationCount: 250 })
   ]);
-  return buildHouseholdContext(accounts.rows, liabilities.rows, holdings.rows, plan.rows[0] || null);
+  return buildHouseholdContext(
+    accounts.rows,
+    liabilities.rows,
+    holdings.rows,
+    plan.rows[0] || null,
+    incomes.rows,
+    expenses.rows,
+    projection
+  );
 }
 
 chatRouter.post('/', async (req, res, next) => {

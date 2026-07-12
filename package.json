@@ -1,6 +1,6 @@
 {
   "name": "nirvana-financial-planner",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Nirvana Phase 1 personal finance, retirement planning, portfolio research, and scenario analysis platform.",

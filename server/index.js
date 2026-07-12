@@ -16,6 +16,7 @@ import { accountsRouter } from './routes/accounts.js';
 import { marketRouter } from './routes/market.js';
 import { scenariosRouter } from './routes/scenarios.js';
 import { retirementRouter } from './routes/retirement.js';
+import { planningRouter } from './routes/planning.js';
 import { chatRouter } from './routes/chat.js';
 import { settingsRouter } from './routes/settings.js';
 import { stripeRouter, stripeWebhookHandler } from './routes/stripe.js';
@@ -79,7 +80,7 @@ app.get('/api/health', async (_req, res) => {
     service: 'nirvana',
     status: database === 'ok' ? 'ok' : 'degraded',
     database,
-    version: '0.1.0'
+    version: '0.3.0'
   });
 });
 
@@ -103,6 +104,7 @@ app.use('/api/accounts', requireAuth, householdContext, accountsRouter);
 app.use('/api/market', requireAuth, householdContext, marketRouter);
 app.use('/api/scenarios', requireAuth, householdContext, scenariosRouter);
 app.use('/api/retirement', requireAuth, householdContext, retirementRouter);
+app.use('/api/planning', requireAuth, householdContext, planningRouter);
 app.use('/api/chat', aiLimiter, requireAuth, householdContext, chatRouter);
 app.use('/api/settings', requireAuth, householdContext, settingsRouter);
 app.use('/api/stripe', requireAuth, householdContext, stripeRouter);
@@ -110,7 +112,12 @@ app.use('/api/stripe', requireAuth, householdContext, stripeRouter);
 app.use(express.static(publicDir, {
   extensions: ['html'],
   etag: true,
-  maxAge: config.nodeEnv === 'production' ? '1h' : 0
+  maxAge: config.nodeEnv === 'production' ? '1h' : 0,
+  setHeaders(res, filePath) {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  }
 }));
 
 app.use((req, res) => {

@@ -82,7 +82,8 @@ function renderOverview() {
   $('#netWorthMetric').textContent = money.format(metrics.netWorth);
   $('#assetsMetric').textContent = money.format(metrics.assetsTotal);
   $('#liabilitiesMetric').textContent = money.format(metrics.liabilitiesTotal);
-  $('#portfolioMetric').textContent = money.format(metrics.liquidPortfolio);
+  $('#portfolioMetric').textContent = money.format(metrics.investableAssets ?? metrics.liquidPortfolio);
+  $('#homeEquityMetric').textContent = money.format(metrics.homeEquity || 0);
   $('#accountCountMetric').textContent = `${metrics.accountCount} account${metrics.accountCount === 1 ? '' : 's'}`;
   $('#holdingsCountMetric').textContent = `${metrics.holdingsCount} holding${metrics.holdingsCount === 1 ? '' : 's'}`;
 
@@ -199,6 +200,49 @@ function renderProjection() {
   }
 }
 
+const investmentDefaults = {
+  growth: { expectedReturnPct: 8.0, expectedVolatilityPct: 18.0, hint: 'Higher-growth fund assumption with wider potential swings.' },
+  balanced: { expectedReturnPct: 6.0, expectedVolatilityPct: 12.0, hint: 'Balanced stock-and-bond portfolio assumption.' },
+  conservative: { expectedReturnPct: 4.0, expectedVolatilityPct: 7.0, hint: 'Lower-risk fund assumption with lower modeled growth.' },
+  self_managed: { expectedReturnPct: 7.0, expectedVolatilityPct: 20.0, hint: 'User-defined assumption for self-managed stocks. This is not a forecast.' }
+};
+
+function isRetirementType(type) {
+  return ['ira', '401k', 'retirement'].includes(type);
+}
+
+function refreshInvestmentProfile(resetValues = false) {
+  const form = $('#accountForm');
+  const type = form.accountType.value;
+  const fields = $('#investmentProfileFields');
+  fields.classList.toggle('hidden', !isRetirementType(type));
+  if (!isRetirementType(type)) return;
+
+  const style = form.investmentStyle.value || 'balanced';
+  const defaults = investmentDefaults[style];
+  if (resetValues) {
+    form.expectedReturnPct.value = defaults.expectedReturnPct;
+    form.expectedVolatilityPct.value = defaults.expectedVolatilityPct;
+  }
+  $('#investmentProfileHint').textContent = defaults.hint;
+}
+
+function refreshPropertyProfile(resetValues = false) {
+  const form = $('#accountForm');
+  const isProperty = form.accountType.value === 'property';
+  $('#propertyProfileFields').classList.toggle('hidden', !isProperty);
+  if (!isProperty) return;
+  if (resetValues) {
+    form.isPrimaryResidence.checked = false;
+    form.retirementTreatment.value = 'keep';
+    form.retirementTreatmentAge.value = '';
+    form.retirementCashRelease.value = '';
+    form.propertyGrowthRatePct.value = '3.0';
+  }
+  const treatment = form.retirementTreatment.value;
+  $('#propertyReleaseFields').classList.toggle('hidden', ['keep', 'convert_to_rental', 'undecided'].includes(treatment));
+}
+
 function resetAccountEditor() {
   state.editingAccountId = null;
   const form = $('#accountForm');
@@ -206,6 +250,16 @@ function resetAccountEditor() {
   $('#accountFormTitle').textContent = 'Add an asset';
   $('#accountSubmitButton').textContent = 'Add account';
   $('#accountCancelEdit').classList.add('hidden');
+  form.investmentStyle.value = 'balanced';
+  form.expectedReturnPct.value = '6.0';
+  form.expectedVolatilityPct.value = '12.0';
+  refreshInvestmentProfile(false);
+  form.isPrimaryResidence.checked = false;
+  form.retirementTreatment.value = 'keep';
+  form.retirementTreatmentAge.value = '';
+  form.retirementCashRelease.value = '';
+  form.propertyGrowthRatePct.value = '3.0';
+  refreshPropertyProfile(false);
 }
 
 function resetLiabilityEditor() {
@@ -226,6 +280,16 @@ function editAccount(id) {
   form.institution.value = account.institution || '';
   form.accountType.value = account.account_type;
   form.currentBalance.value = account.current_balance ?? 0;
+  form.investmentStyle.value = account.investment_style || 'balanced';
+  form.expectedReturnPct.value = account.expected_return == null ? '6.0' : Number(account.expected_return) * 100;
+  form.expectedVolatilityPct.value = account.expected_volatility == null ? '12.0' : Number(account.expected_volatility) * 100;
+  form.isPrimaryResidence.checked = Boolean(account.is_primary_residence);
+  form.retirementTreatment.value = account.retirement_treatment || 'keep';
+  form.retirementTreatmentAge.value = account.retirement_treatment_age ?? '';
+  form.retirementCashRelease.value = account.retirement_cash_release ?? '';
+  form.propertyGrowthRatePct.value = account.property_growth_rate == null ? '3.0' : Number(account.property_growth_rate) * 100;
+  refreshInvestmentProfile(false);
+  refreshPropertyProfile(false);
   $('#accountFormTitle').textContent = 'Edit asset';
   $('#accountSubmitButton').textContent = 'Save changes';
   $('#accountCancelEdit').classList.remove('hidden');
@@ -243,7 +307,9 @@ function editLiability(id) {
   form.liabilityType.value = liability.liability_type;
   form.currentBalance.value = liability.current_balance ?? 0;
   form.interestRatePct.value = liability.interest_rate == null ? '' : Number(liability.interest_rate) * 100;
-  form.minimumPayment.value = liability.minimum_payment ?? '';
+  form.monthlyPayment.value = liability.monthly_payment ?? liability.minimum_payment ?? '';
+  form.payoffAge.value = liability.payoff_age ?? '';
+  form.linkedAccountId.value = liability.linked_account_id ?? '';
   $('#liabilityFormTitle').textContent = 'Edit liability';
   $('#liabilitySubmitButton').textContent = 'Save changes';
   $('#liabilityCancelEdit').classList.remove('hidden');
@@ -302,7 +368,12 @@ function renderAccounts() {
 
     const details = document.createElement('div');
     details.className = 'account-row-details';
-    details.innerHTML = `<span><strong>${escapeHtml(row.name)}</strong></span><small>${escapeHtml(row.institution || 'Manual')} · ${escapeHtml(row.kind)}</small>`;
+    const profile = row.investment_style
+      ? ` · ${escapeHtml(row.investment_style.replaceAll('_', ' '))} · ${(Number(row.expected_return || 0) * 100).toFixed(1)}% modeled growth`
+      : row.account_type === 'property'
+        ? ` · ${row.is_primary_residence ? 'primary residence' : 'property'} · ${escapeHtml((row.retirement_treatment || 'keep').replaceAll('_', ' '))}`
+        : '';
+    details.innerHTML = `<span><strong>${escapeHtml(row.name)}</strong></span><small>${escapeHtml(row.institution || 'Manual')} · ${escapeHtml(row.kind)}${profile}</small>`;
 
     const trailing = document.createElement('div');
     trailing.className = 'account-row-trailing';
@@ -361,6 +432,7 @@ async function loadDashboard() {
   populateRetirementForm();
   renderProjection();
   await loadScenarioHistory();
+  document.dispatchEvent(new CustomEvent('nirvana:data-loaded', { detail: state }));
 }
 
 async function loadScenarioHistory() {
@@ -396,8 +468,8 @@ function renderScenario(result) {
     <p class="mini-disclaimer">${result.concentrationFlag ? 'Concentration flag: this holding reaches at least 25% of the modeled portfolio. ' : ''}${result.assumptions.join(' ')}</p>`;
 }
 
-function appendMessage(role, text) {
-  const wrap = $('#chatMessages');
+function createMessage(container, role, text) {
+  if (!container) return null;
   const message = document.createElement('div');
   message.className = `${role === 'user' ? 'user-message' : 'assistant-message'} message`;
   const label = document.createElement('div');
@@ -406,9 +478,46 @@ function appendMessage(role, text) {
   const body = document.createElement('p');
   body.textContent = text;
   message.append(label, body);
-  wrap.append(message);
-  wrap.scrollTop = wrap.scrollHeight;
+  container.append(message);
+  container.scrollTop = container.scrollHeight;
   return message;
+}
+
+function appendMessage(role, text) {
+  const main = createMessage($('#chatMessages'), role, text);
+  const drawer = createMessage($('#assistantMessages'), role, text);
+  if (main) main.mirrorMessage = drawer;
+  return main || drawer;
+}
+
+function updateMessage(message, text) {
+  if (!message) return;
+  const body = message.querySelector('p');
+  if (body) body.textContent = text;
+  const mirrorBody = message.mirrorMessage?.querySelector('p');
+  if (mirrorBody) mirrorBody.textContent = text;
+}
+
+async function askNirvana(text, button) {
+  appendMessage('user', text);
+  if (button) button.disabled = true;
+  const pending = appendMessage('assistant', 'Researching and grounding the response…');
+  try {
+    const response = await api('/api/chat', {
+      method: 'POST',
+      body: JSON.stringify({ message: text, threadId: state.threadId || undefined })
+    });
+    state.threadId = response.threadId;
+    updateMessage(pending, response.message);
+    renderResearchChart(response.chart);
+    renderSources(response.sources);
+    if (response.agents?.length) $('#skillCount').textContent = `${response.agents.length} agents active`;
+    $('#disclaimerBox').textContent = `${response.disclaimer.title}: ${response.disclaimer.text} ${response.disclaimer.marketDataNotice}`;
+  } catch (error) {
+    updateMessage(pending, `I could not complete that request: ${error.message}`);
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 function renderResearchChart(chart) {
@@ -500,7 +609,10 @@ async function initialize() {
           annualRetirementSpending: values.annualRetirementSpending,
           expectedReturn: Number(values.expectedReturnPct) / 100,
           volatility: Number(values.volatilityPct) / 100,
-          inflation: Number(values.inflationPct) / 100
+          inflation: Number(values.inflationPct) / 100,
+          successThreshold: Number(values.successThresholdPct) / 100,
+          maxSearchAge: values.maxSearchAge,
+          effectiveTaxRate: Number(values.effectiveTaxRatePct) / 100
         })
       });
       await loadDashboard();
@@ -532,11 +644,31 @@ async function initialize() {
     button.disabled = true;
     try {
       const editing = Boolean(state.editingAccountId);
+      const values = formObject(form);
+      const payload = {
+        name: values.name,
+        institution: values.institution,
+        accountType: values.accountType,
+        currentBalance: values.currentBalance,
+        currency: 'USD'
+      };
+      if (isRetirementType(values.accountType)) {
+        payload.investmentStyle = values.investmentStyle;
+        payload.expectedReturn = Number(values.expectedReturnPct) / 100;
+        payload.expectedVolatility = Number(values.expectedVolatilityPct) / 100;
+      }
+      if (values.accountType === 'property') {
+        payload.isPrimaryResidence = form.isPrimaryResidence.checked;
+        payload.retirementTreatment = values.retirementTreatment;
+        payload.retirementTreatmentAge = values.retirementTreatmentAge || null;
+        payload.retirementCashRelease = values.retirementCashRelease || null;
+        payload.propertyGrowthRate = Number(values.propertyGrowthRatePct || 3) / 100;
+      }
       await api(
         editing ? `/api/accounts/${state.editingAccountId}` : '/api/accounts',
         {
           method: editing ? 'PUT' : 'POST',
-          body: JSON.stringify(formObject(form))
+          body: JSON.stringify(payload)
         }
       );
       resetAccountEditor();
@@ -546,6 +678,12 @@ async function initialize() {
   });
 
   $('#accountCancelEdit').addEventListener('click', resetAccountEditor);
+  $('#accountType').addEventListener('change', () => {
+    refreshInvestmentProfile(true);
+    refreshPropertyProfile(true);
+  });
+  $('#investmentStyle').addEventListener('change', () => refreshInvestmentProfile(true));
+  $('#retirementTreatment').addEventListener('change', () => refreshPropertyProfile(false));
 
   $('#liabilityForm').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -559,7 +697,10 @@ async function initialize() {
       delete payload.interestRatePct;
       if (values.interestRatePct !== '') payload.interestRate = Number(values.interestRatePct) / 100;
       else delete payload.interestRate;
-      if (!payload.minimumPayment) delete payload.minimumPayment;
+      payload.minimumPayment = values.monthlyPayment || null;
+      payload.monthlyPayment = values.monthlyPayment || null;
+      payload.payoffAge = values.payoffAge || null;
+      payload.linkedAccountId = values.linkedAccountId || null;
 
       await api(
         editing ? `/api/accounts/liabilities/${state.editingLiabilityId}` : '/api/accounts/liabilities',
@@ -599,23 +740,34 @@ async function initialize() {
     const form = event.currentTarget;
     const text = form.message.value.trim();
     if (!text) return;
-    const button = event.submitter;
-    appendMessage('user', text);
     form.message.value = '';
-    button.disabled = true;
-    const pending = appendMessage('assistant', 'Researching and grounding the response…');
-    try {
-      const response = await api('/api/chat', { method: 'POST', body: JSON.stringify({ message: text, threadId: state.threadId || undefined }) });
-      state.threadId = response.threadId;
-      pending.querySelector('p').textContent = response.message;
-      renderResearchChart(response.chart);
-      renderSources(response.sources);
-      if (response.agents?.length) $('#skillCount').textContent = `${response.agents.length} agents active`;
-      $('#disclaimerBox').textContent = `${response.disclaimer.title}: ${response.disclaimer.text} ${response.disclaimer.marketDataNotice}`;
-    } catch (error) {
-      pending.querySelector('p').textContent = `I could not complete that request: ${error.message}`;
-    } finally { button.disabled = false; }
+    await askNirvana(text, event.submitter);
+  });
+
+  const setAssistantOpen = (open) => {
+    $('#assistantDrawer').classList.toggle('open', open);
+    document.body.classList.toggle('assistant-open', open);
+  };
+  $('#assistantToggle').addEventListener('click', () => setAssistantOpen(true));
+  $('#assistantFab').addEventListener('click', () => setAssistantOpen(true));
+  $('#assistantClose').addEventListener('click', () => setAssistantOpen(false));
+
+  $$('[data-assistant-prompt]').forEach((button) => button.addEventListener('click', () => {
+    $('#assistantForm').message.value = button.dataset.assistantPrompt;
+    $('#assistantForm').message.focus();
+  }));
+
+  $('#assistantForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const text = form.message.value.trim();
+    if (!text) return;
+    form.message.value = '';
+    await askNirvana(text, event.submitter);
   });
 }
 
+window.nirvanaState = state;
+window.loadNirvanaDashboard = loadDashboard;
+window.showNirvanaAlert = showAlert;
 document.addEventListener('DOMContentLoaded', initialize);

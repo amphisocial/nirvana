@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Nirvana financial planning dashboard">
   <title>Nirvana Dashboard</title>
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=0.3.0">
 </head>
 <body class="app-body">
   <aside class="sidebar">
@@ -13,6 +13,7 @@
     <nav class="side-nav" aria-label="Primary">
       <button class="nav-item active" data-view="overview"><span>Overview</span></button>
       <button class="nav-item" data-view="retirement"><span>Retirement</span></button>
+      <button class="nav-item" data-view="cashflow"><span>Income &amp; Expenses</span></button>
       <button class="nav-item" data-view="scenario"><span>What-if Lab</span></button>
       <button class="nav-item" data-view="research"><span>Research AI</span></button>
       <button class="nav-item" data-view="accounts"><span>Accounts</span></button>
@@ -26,17 +27,18 @@
   <main class="app-main">
     <header class="app-header">
       <div><p class="eyebrow">FINANCIAL COMMAND CENTER</p><h1 id="pageTitle">Overview</h1></div>
-      <div class="header-actions"><span id="userLabel" class="user-chip">Loading…</span><button id="refreshButton" class="icon-button" aria-label="Refresh dashboard">↻</button></div>
+      <div class="header-actions"><button id="assistantToggle" class="assistant-toggle" type="button">✦ Ask Nirvana</button><span id="userLabel" class="user-chip">Loading…</span><button id="refreshButton" class="icon-button" aria-label="Refresh dashboard">↻</button></div>
     </header>
 
     <div id="globalAlert" class="alert hidden" role="alert"></div>
 
     <section id="overview" class="view active-view">
-      <div class="metric-grid">
+      <div class="metric-grid metric-grid-five">
         <article class="metric-card metric-featured"><span>Net worth</span><strong id="netWorthMetric">—</strong><small id="netWorthDelta">Assets minus liabilities</small></article>
         <article class="metric-card"><span>Total assets</span><strong id="assetsMetric">—</strong><small id="accountCountMetric">— accounts</small></article>
         <article class="metric-card"><span>Liabilities</span><strong id="liabilitiesMetric">—</strong><small>Tracked obligations</small></article>
-        <article class="metric-card"><span>Investable portfolio</span><strong id="portfolioMetric">—</strong><small id="holdingsCountMetric">— holdings</small></article>
+        <article class="metric-card"><span>Investable assets</span><strong id="portfolioMetric">—</strong><small id="holdingsCountMetric">Excludes your primary home</small></article>
+        <article class="metric-card"><span>Home equity</span><strong id="homeEquityMetric">—</strong><small>Net worth, not retirement cash</small></article>
       </div>
       <div class="dashboard-grid two-one">
         <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">TRAJECTORY</span><h2>Net worth over time</h2></div></div><div class="chart-wrap chart-tall"><canvas id="netWorthChart"></canvas></div></article>
@@ -49,21 +51,73 @@
     </section>
 
     <section id="retirement" class="view">
+      <div class="metric-grid retirement-metric-grid">
+        <article class="metric-card metric-featured"><span>Earliest feasible retirement</span><strong id="earliestFeasibleAge">—</strong><small id="earliestFeasibleCopy">Based on your selected success threshold</small></article>
+        <article class="metric-card"><span>Selected-age success</span><strong id="selectedAgeSuccess">—</strong><small id="selectedAgeLabel">At your chosen retirement age</small></article>
+        <article class="metric-card"><span>Monthly expenses at retirement</span><strong id="retirementExpenseMetric">—</strong><small>From saved expense assumptions</small></article>
+        <article class="metric-card"><span>Home equity excluded</span><strong id="homeEquityRetirementMetric">—</strong><small>Unless you define a cash-release scenario</small></article>
+      </div>
       <div class="dashboard-grid two-one">
-        <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">MONTE CARLO</span><h2>Portfolio range by age</h2></div><span id="retirementStatus" class="status-pill neutral">—</span></div><div class="chart-wrap chart-extra-tall"><canvas id="retirementChart"></canvas></div><p class="chart-note">Shaded outcomes are represented by 10th, 50th, and 90th percentile paths from seeded simulations.</p></article>
+        <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">MONTE CARLO</span><h2>Investable portfolio range by age</h2></div><span id="retirementStatus" class="status-pill neutral">—</span></div><div class="chart-wrap chart-extra-tall"><canvas id="retirementChart"></canvas></div><p class="chart-note">Primary-residence value is excluded unless a sale, downsizing, or equity-release scenario is saved.</p></article>
         <article class="panel form-panel"><div class="panel-head"><div><span class="panel-kicker">ASSUMPTIONS</span><h2>Plan inputs</h2></div></div>
           <form id="retirementForm" class="stack-form">
             <div class="form-row"><label>Current age<input name="currentAge" type="number" min="18" max="90" required></label><label>Retirement age<input name="retirementAge" type="number" min="19" max="95" required></label></div>
-            <label>Plan through age<input name="planEndAge" type="number" min="50" max="120" required></label>
-            <label>Annual contribution<input name="annualContribution" type="number" min="0" step="100" required></label>
-            <label>Annual retirement spending<input name="annualRetirementSpending" type="number" min="0" step="100" required></label>
-            <div class="form-row"><label>Expected return %<input name="expectedReturnPct" type="number" min="-50" max="50" step="0.1" required></label><label>Volatility %<input name="volatilityPct" type="number" min="0" max="100" step="0.1" required></label></div>
-            <label>Inflation %<input name="inflationPct" type="number" min="-2" max="20" step="0.1" required></label>
+            <div class="form-row"><label>Plan through age<input name="planEndAge" type="number" min="50" max="120" required></label><label>Search retirement through age<input name="maxSearchAge" type="number" min="40" max="95" required></label></div>
+            <label>Annual contribution to investable accounts<input name="annualContribution" type="number" min="0" step="100" required></label>
+            <label>Fallback annual retirement spending<input name="annualRetirementSpending" type="number" min="0" step="100" required><small>Used only until detailed expenses are saved.</small></label>
+            <div class="form-row"><label>Fallback expected return %<input name="expectedReturnPct" type="number" min="-50" max="50" step="0.1" required></label><label>Fallback volatility %<input name="volatilityPct" type="number" min="0" max="100" step="0.1" required></label></div>
+            <div class="form-row"><label>General inflation %<input name="inflationPct" type="number" min="-2" max="20" step="0.1" required></label><label>Effective tax rate %<input name="effectiveTaxRatePct" type="number" min="0" max="60" step="0.1" required></label></div>
+            <label>Required success probability %<input name="successThresholdPct" type="number" min="50" max="99" step="1" required></label>
             <button class="button button-primary" type="submit">Update projection</button>
           </form>
         </article>
       </div>
-      <article class="panel"><div class="panel-head"><div><span class="panel-kicker">MODEL LIMITS</span><h2>What Phase 1 includes</h2></div></div><div id="retirementAssumptions" class="assumption-grid"></div></article>
+      <div class="dashboard-grid two-one">
+        <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">MONTHLY CASH FLOW</span><h2>Income, expenses and withdrawals by age</h2></div></div><div class="chart-wrap chart-tall"><canvas id="retirementCashflowChart"></canvas></div></article>
+        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">AGE TRADEOFF</span><h2>Retirement-age comparison</h2></div></div><div class="table-wrap retirement-age-table"><table><thead><tr><th>Age</th><th>Success</th><th>Median at plan end</th></tr></thead><tbody id="retirementAgeTable"></tbody></table></div></article>
+      </div>
+      <article class="panel"><div class="panel-head"><div><span class="panel-kicker">MODEL ASSUMPTIONS</span><h2>What the projection is using</h2></div></div><div id="retirementAssumptions" class="assumption-grid"></div></article>
+    </section>
+
+    <section id="cashflow" class="view">
+      <div class="metric-grid">
+        <article class="metric-card metric-featured"><span>Current monthly income</span><strong id="currentIncomeMetric">—</strong><small>Before modeled taxes</small></article>
+        <article class="metric-card"><span>Current monthly expenses</span><strong id="currentExpenseMetric">—</strong><small>Saved recurring expenses</small></article>
+        <article class="metric-card"><span>Current monthly surplus</span><strong id="currentSurplusMetric">—</strong><small>Income minus expenses</small></article>
+        <article class="metric-card"><span>Retirement monthly gap</span><strong id="retirementGapMetric">—</strong><small>Expenses minus non-portfolio income</small></article>
+      </div>
+      <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">LIFETIME CASH FLOW</span><h2>Monthly income and expenses over time</h2></div></div><div class="chart-wrap chart-tall"><canvas id="cashflowChart"></canvas></div></article>
+      <div class="dashboard-grid equal">
+        <article class="panel form-panel"><div class="panel-head"><div><span class="panel-kicker">INCOME</span><h2 id="incomeFormTitle">Add income source</h2></div></div>
+          <form id="incomeForm" class="stack-form">
+            <label>Name<input name="name" required placeholder="Salary, Social Security, pension"></label>
+            <label>Type<select name="incomeType"><option value="employment">Employment</option><option value="social_security">Social Security</option><option value="pension">Pension</option><option value="annuity">Annuity</option><option value="rental">Rental income</option><option value="part_time">Part-time work</option><option value="other">Other</option></select></label>
+            <div class="form-row"><label>Amount<input name="amount" type="number" min="0" step="0.01" required></label><label>Frequency<select name="frequency"><option value="monthly">Monthly</option><option value="biweekly">Biweekly</option><option value="weekly">Weekly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select></label></div>
+            <div class="form-row"><label>Start age<input name="startAge" type="number" min="0" max="120"></label><label>End age<input name="endAge" type="number" min="0" max="120"></label></div>
+            <div class="form-row"><label>Annual growth / COLA %<input name="inflationRatePct" type="number" min="-10" max="20" step="0.1" value="0"></label><label class="check-label"><input name="taxable" type="checkbox" checked> Taxable income</label></div>
+            <label class="check-label"><input name="endsAtRetirement" type="checkbox"> Ends when I retire</label>
+            <label>Notes<textarea name="notes" rows="2"></textarea></label>
+            <div class="form-actions"><button id="incomeSubmitButton" class="button button-primary" type="submit">Add income</button><button id="incomeCancelEdit" class="button button-secondary hidden" type="button">Cancel edit</button></div>
+          </form>
+        </article>
+        <article class="panel form-panel"><div class="panel-head"><div><span class="panel-kicker">EXPENSE</span><h2 id="expenseFormTitle">Add monthly expense</h2></div></div>
+          <form id="expenseForm" class="stack-form">
+            <label>Name<input name="name" required placeholder="Mortgage, groceries, travel"></label>
+            <label>Category<select name="category"><option value="housing">Housing</option><option value="mortgage">Mortgage</option><option value="property_tax">Property tax</option><option value="home_insurance">Home insurance</option><option value="utilities">Utilities</option><option value="food">Food</option><option value="transportation">Transportation</option><option value="healthcare_premium">Healthcare premium</option><option value="healthcare_out_of_pocket">Healthcare out of pocket</option><option value="travel">Travel</option><option value="entertainment">Entertainment</option><option value="education">Education</option><option value="family_support">Family support</option><option value="insurance">Insurance</option><option value="debt_payment">Debt payment</option><option value="taxes">Taxes</option><option value="other">Other</option></select></label>
+            <div class="form-row"><label>Amount<input name="amount" type="number" min="0" step="0.01" required></label><label>Frequency<select name="frequency"><option value="monthly">Monthly</option><option value="weekly">Weekly</option><option value="biweekly">Biweekly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select></label></div>
+            <label>At retirement<select name="retirementBehavior" id="retirementBehavior"><option value="same">Continues at same amount</option><option value="ends">Ends at retirement</option><option value="custom">Changes to another amount</option><option value="starts">Starts at retirement</option></select></label>
+            <div id="postRetirementExpenseFields" class="form-row hidden"><label>Post-retirement amount<input name="postRetirementAmount" type="number" min="0" step="0.01"></label><label>Frequency<select name="postRetirementFrequency"><option value="monthly">Monthly</option><option value="weekly">Weekly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select></label></div>
+            <div class="form-row"><label>Start age<input name="startAge" type="number" min="0" max="120"></label><label>End / payoff age<input name="endAge" type="number" min="0" max="120"></label></div>
+            <div class="form-row"><label>Annual inflation %<input name="inflationRatePct" type="number" min="-10" max="20" step="0.1" value="2.5"></label><label class="check-label"><input name="essential" type="checkbox" checked> Essential expense</label></div>
+            <label>Notes<textarea name="notes" rows="2"></textarea></label>
+            <div class="form-actions"><button id="expenseSubmitButton" class="button button-primary" type="submit">Add expense</button><button id="expenseCancelEdit" class="button button-secondary hidden" type="button">Cancel edit</button></div>
+          </form>
+        </article>
+      </div>
+      <div class="dashboard-grid equal">
+        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">SAVED INCOME</span><h2>Income sources</h2></div></div><div id="incomeList" class="cashflow-list"></div></article>
+        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">SAVED EXPENSES</span><h2>Recurring expenses</h2></div></div><div id="expenseList" class="cashflow-list"></div></article>
+      </div>
     </section>
 
     <section id="scenario" class="view">
@@ -97,8 +151,60 @@
 
     <section id="accounts" class="view">
       <div class="dashboard-grid equal">
-        <article class="panel form-panel"><div class="panel-head"><div><span class="panel-kicker">MANUAL ACCOUNT</span><h2 id="accountFormTitle">Add an asset</h2></div></div><form id="accountForm" class="stack-form"><label>Account name<input name="name" required placeholder="Fidelity Brokerage"></label><label>Institution<input name="institution" placeholder="Optional"></label><label>Account type<select name="accountType"><option value="cash">Cash</option><option value="brokerage">Brokerage</option><option value="retirement">Retirement</option><option value="property">Property</option><option value="hsa">HSA</option><option value="529">529</option><option value="other_asset">Other asset</option></select></label><label>Current balance<input name="currentBalance" type="number" min="0" step="0.01" required></label><div class="form-actions"><button id="accountSubmitButton" class="button button-primary" type="submit">Add account</button><button id="accountCancelEdit" class="button button-secondary hidden" type="button">Cancel edit</button></div></form></article>
-        <article class="panel form-panel"><div class="panel-head"><div><span class="panel-kicker">MANUAL LIABILITY</span><h2 id="liabilityFormTitle">Add a debt</h2></div></div><form id="liabilityForm" class="stack-form"><label>Liability name<input name="name" required placeholder="Home mortgage"></label><label>Institution<input name="institution" placeholder="Optional"></label><label>Type<select name="liabilityType"><option value="mortgage">Mortgage</option><option value="credit_card">Credit card</option><option value="student_loan">Student loan</option><option value="auto_loan">Auto loan</option><option value="personal_loan">Personal loan</option><option value="other">Other</option></select></label><div class="form-row"><label>Balance<input name="currentBalance" type="number" min="0" step="0.01" required></label><label>Rate %<input name="interestRatePct" type="number" min="0" max="100" step="0.01"></label></div><label>Minimum payment<input name="minimumPayment" type="number" min="0" step="0.01"></label><div class="form-actions"><button id="liabilitySubmitButton" class="button button-primary" type="submit">Add liability</button><button id="liabilityCancelEdit" class="button button-secondary hidden" type="button">Cancel edit</button></div></form></article>
+        <article class="panel form-panel retirement-account-form">
+          <div class="panel-head"><div><span class="panel-kicker">MANUAL ACCOUNT</span><h2 id="accountFormTitle">Add an asset</h2></div></div>
+          <form id="accountForm" class="stack-form">
+            <label>Account name<input name="name" required placeholder="Fidelity 401(k)"></label>
+            <label>Institution<input name="institution" placeholder="Optional"></label>
+            <label>Account type
+              <select name="accountType" id="accountType">
+                <option value="cash">Cash</option>
+                <option value="brokerage">Taxable brokerage</option>
+                <option value="ira">IRA / Roth IRA</option>
+                <option value="401k">401(k) / 403(b)</option>
+                <option value="property">Property</option>
+                <option value="hsa">HSA</option>
+                <option value="529">529 education</option>
+                <option value="other_asset">Other asset</option>
+              </select>
+            </label>
+            <div id="investmentProfileFields" class="investment-profile hidden">
+              <div class="profile-intro">
+                <strong>How is this retirement account invested?</strong>
+                <small>This assumption drives the account's projected year-over-year growth.</small>
+              </div>
+              <label>Investment approach
+                <select name="investmentStyle" id="investmentStyle">
+                  <option value="growth">Growth funds — modeled at 8.0%</option>
+                  <option value="balanced" selected>Balanced funds — modeled at 6.0%</option>
+                  <option value="conservative">Lower-risk funds — modeled at 4.0%</option>
+                  <option value="self_managed">Self-managed stocks — custom assumption</option>
+                </select>
+              </label>
+              <div class="form-row">
+                <label>Expected annual growth %
+                  <input name="expectedReturnPct" id="expectedReturnPct" type="number" min="-50" max="50" step="0.1" value="6.0">
+                </label>
+                <label>Expected volatility %
+                  <input name="expectedVolatilityPct" id="expectedVolatilityPct" type="number" min="0" max="100" step="0.1" value="12.0">
+                </label>
+              </div>
+              <p id="investmentProfileHint" class="mini-disclaimer">Balanced portfolio assumption. You can adjust it.</p>
+            </div>
+            <div id="propertyProfileFields" class="investment-profile hidden">
+              <div class="profile-intro"><strong>How should Nirvana treat this property?</strong><small>A primary home counts in net worth but not retirement funding unless you define a cash release.</small></div>
+              <label class="check-label"><input name="isPrimaryResidence" type="checkbox"> This is my primary residence</label>
+              <label>Retirement treatment<select name="retirementTreatment" id="retirementTreatment"><option value="keep">Keep indefinitely</option><option value="sell_at_retirement">Sell at retirement</option><option value="sell_at_age">Sell at a specific age</option><option value="downsize">Downsize and release equity</option><option value="convert_to_rental">Convert to rental</option><option value="equity_access">Home-equity / reverse-mortgage scenario</option><option value="undecided">Undecided</option></select></label>
+              <div id="propertyReleaseFields" class="hidden">
+                <div class="form-row"><label>Scenario age<input name="retirementTreatmentAge" type="number" min="18" max="120"></label><label>Net cash released, today's dollars<input name="retirementCashRelease" type="number" min="0" step="1000"></label></div>
+                <label>Property growth assumption %<input name="propertyGrowthRatePct" type="number" min="-20" max="20" step="0.1" value="3.0"></label>
+              </div>
+            </div>
+            <label>Current balance<input name="currentBalance" type="number" min="0" step="0.01" required></label>
+            <div class="form-actions"><button id="accountSubmitButton" class="button button-primary" type="submit">Add account</button><button id="accountCancelEdit" class="button button-secondary hidden" type="button">Cancel edit</button></div>
+          </form>
+        </article>
+        <article class="panel form-panel"><div class="panel-head"><div><span class="panel-kicker">MANUAL LIABILITY</span><h2 id="liabilityFormTitle">Add a debt</h2></div></div><form id="liabilityForm" class="stack-form"><label>Liability name<input name="name" required placeholder="Home mortgage"></label><label>Institution<input name="institution" placeholder="Optional"></label><label>Type<select name="liabilityType"><option value="mortgage">Mortgage</option><option value="credit_card">Credit card</option><option value="student_loan">Student loan</option><option value="auto_loan">Auto loan</option><option value="personal_loan">Personal loan</option><option value="other">Other</option></select></label><div class="form-row"><label>Balance<input name="currentBalance" type="number" min="0" step="0.01" required></label><label>Rate %<input name="interestRatePct" type="number" min="0" max="100" step="0.01"></label></div><div class="form-row"><label>Monthly payment<input name="monthlyPayment" type="number" min="0" step="0.01"></label><label>Expected payoff age<input name="payoffAge" type="number" min="18" max="120"></label></div><label>Linked property<select name="linkedAccountId" id="linkedPropertySelect"><option value="">Not linked</option></select></label><p class="mini-disclaimer">A saved monthly payment is automatically included in retirement cash flow until the payoff age. Do not enter the same payment again as an expense.</p><div class="form-actions"><button id="liabilitySubmitButton" class="button button-primary" type="submit">Add liability</button><button id="liabilityCancelEdit" class="button button-secondary hidden" type="button">Cancel edit</button></div></form></article>
       </div>
       <div class="dashboard-grid two-one">
         <article class="panel"><div class="panel-head"><div><span class="panel-kicker">CONNECTED DATA</span><h2>Accounts and liabilities</h2></div><span id="aggregationBadge" class="status-pill neutral">Manual</span></div><div id="accountsList" class="account-list"></div></article>
@@ -107,7 +213,32 @@
     </section>
   </main>
 
+
+  <button id="assistantFab" class="assistant-fab" type="button" aria-label="Open Nirvana AI">✦</button>
+  <aside id="assistantDrawer" class="assistant-drawer" aria-label="Nirvana AI Planner">
+    <div class="assistant-drawer-head">
+      <div><span class="panel-kicker">AI PLANNER ASSISTANT</span><h2>Nirvana</h2></div>
+      <button id="assistantClose" class="icon-button" type="button" aria-label="Close assistant">×</button>
+    </div>
+    <p class="assistant-welcome">Explore your plan, surface risks, and test decisions using your saved financial data.</p>
+    <div class="assistant-suggestions">
+      <button data-assistant-prompt="When can I securely retire?">When can I securely retire?</button>
+      <button data-assistant-prompt="Is my retirement plan complete and up to date?">Is my plan complete?</button>
+      <button data-assistant-prompt="How would a market crash affect my retirement accounts?">Am I prepared for a market crash?</button>
+      <button data-assistant-prompt="What scenarios should I run next?">What scenarios should I run?</button>
+    </div>
+    <div id="assistantMessages" class="assistant-messages">
+      <div class="assistant-message message"><div class="message-label">Nirvana</div><p>Ask about your retirement plan, portfolio, or a stock.</p></div>
+    </div>
+    <form id="assistantForm" class="assistant-input">
+      <textarea name="message" rows="2" maxlength="6000" placeholder="Ask anything…" required></textarea>
+      <button class="assistant-send" type="submit" aria-label="Ask Nirvana">➤</button>
+    </form>
+    <p class="assistant-disclaimer">Educational model output—not financial advice.</p>
+  </aside>
+
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
-  <script src="/app.js" defer></script>
+  <script src="/app.js?v=0.3.0" defer></script>
+  <script src="/planning-ui.js?v=0.3.0" defer></script>
 </body>
 </html>

@@ -3,19 +3,37 @@ import { pool } from '../db.js';
 
 export const dashboardRouter = Router();
 
+const INVESTABLE_TYPES = new Set(['cash', 'brokerage', 'ira', '401k', 'retirement', 'hsa']);
+
 dashboardRouter.get('/summary', async (req, res, next) => {
   try {
     const householdId = req.householdId;
     const [accountsResult, liabilitiesResult, holdingsResult, snapshotsResult, planResult] = await Promise.all([
       pool.query(`
-        SELECT id, name, institution, account_type, current_balance::float8 AS current_balance,
+        SELECT id, name, institution, account_type,
+               current_balance::float8 AS current_balance,
+               investment_style,
+               expected_return::float8 AS expected_return,
+               expected_volatility::float8 AS expected_volatility,
+               is_primary_residence,
+               retirement_treatment,
+               retirement_treatment_age,
+               retirement_cash_release::float8 AS retirement_cash_release,
+               property_growth_rate::float8 AS property_growth_rate,
                is_manual, last_verified_at
-        FROM accounts WHERE household_id = $1 ORDER BY current_balance DESC`, [householdId]),
+        FROM accounts
+        WHERE household_id = $1
+        ORDER BY current_balance DESC`, [householdId]),
       pool.query(`
-        SELECT id, name, institution, liability_type, current_balance::float8 AS current_balance,
-               interest_rate::float8 AS interest_rate, minimum_payment::float8 AS minimum_payment,
-               last_verified_at
-        FROM liabilities WHERE household_id = $1 ORDER BY current_balance DESC`, [householdId]),
+        SELECT id, name, institution, liability_type,
+               current_balance::float8 AS current_balance,
+               interest_rate::float8 AS interest_rate,
+               minimum_payment::float8 AS minimum_payment,
+               monthly_payment::float8 AS monthly_payment,
+               payoff_age, linked_account_id, last_verified_at
+        FROM liabilities
+        WHERE household_id = $1
+        ORDER BY current_balance DESC`, [householdId]),
       pool.query(`
         SELECT h.symbol,
                COALESCE(MAX(h.name), h.symbol) AS name,
@@ -36,7 +54,7 @@ dashboardRouter.get('/summary', async (req, res, next) => {
         FROM net_worth_snapshots
         WHERE household_id = $1
         ORDER BY snapshot_date`, [householdId]),
-      pool.query(`SELECT * FROM retirement_plans WHERE household_id = $1`, [householdId])
+      pool.query('SELECT * FROM retirement_plans WHERE household_id = $1', [householdId])
     ]);
 
     const accounts = accountsResult.rows;
@@ -45,12 +63,23 @@ dashboardRouter.get('/summary', async (req, res, next) => {
     const assetsTotal = accounts.reduce((sum, row) => sum + Number(row.current_balance || 0), 0);
     const liabilitiesTotal = liabilities.reduce((sum, row) => sum + Number(row.current_balance || 0), 0);
     const netWorth = assetsTotal - liabilitiesTotal;
-    const liquidPortfolio = accounts
-      .filter((row) => ['cash', 'brokerage', 'retirement', 'hsa', '529'].includes(row.account_type))
+    const investableAssets = accounts
+      .filter((row) => INVESTABLE_TYPES.has(row.account_type))
       .reduce((sum, row) => sum + Number(row.current_balance || 0), 0);
+    const primaryResidences = accounts
+      .filter((row) => row.account_type === 'property' && row.is_primary_residence);
+    const primaryResidenceIds = new Set(primaryResidences.map((row) => row.id));
+    const primaryResidenceValue = primaryResidences
+      .reduce((sum, row) => sum + Number(row.current_balance || 0), 0);
+    const mortgageBalance = liabilities
+      .filter((row) => row.liability_type === 'mortgage')
+      .filter((row) => primaryResidenceIds.has(row.linked_account_id)
+        || (primaryResidences.length === 1 && !row.linked_account_id))
+      .reduce((sum, row) => sum + Number(row.current_balance || 0), 0);
+    const homeEquity = Math.max(0, primaryResidenceValue - mortgageBalance);
 
     const allocation = Object.entries(accounts.reduce((map, row) => {
-      const label = row.account_type.replace('_', ' ');
+      const label = row.account_type.replaceAll('_', ' ');
       map[label] = (map[label] || 0) + Number(row.current_balance || 0);
       return map;
     }, {})).map(([label, value]) => ({ label, value }));
@@ -67,7 +96,11 @@ dashboardRouter.get('/summary', async (req, res, next) => {
         assetsTotal,
         liabilitiesTotal,
         netWorth,
-        liquidPortfolio,
+        investableAssets,
+        liquidPortfolio: investableAssets,
+        primaryResidenceValue,
+        mortgageBalance,
+        homeEquity,
         accountCount: accounts.length,
         holdingsCount: holdings.length
       },
