@@ -6,6 +6,7 @@ import { pool, withTransaction } from '../db.js';
 import { expenseAtAge, incomeAtAge } from '../services/retirement-cashflow-engine.js';
 import { getQuote } from '../services/market/index.js';
 import { linkedContributionForAccount } from '../services/account-contribution.js';
+import { calculateRentalEconomics, estimatePropertyMarket, normalizePropertyEstimate } from '../services/real-estate-intelligence.js';
 import {
   estimatePortfolioMoments,
   researchHoldingsForForecast,
@@ -22,6 +23,26 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 *
 
 const investmentAccountTypes = new Set(['brokerage', 'ira', '401k', 'retirement', '529']);
 const retirementAccountTypes = new Set(['ira', '401k', 'retirement']);
+
+const propertyEstimateSchema = z.object({
+  zipCode: z.string().optional().nullable(),
+  annualAppreciationRate: z.coerce.number().min(-0.2).max(0.2).optional().nullable(),
+  estimatedMonthlyRent: z.coerce.number().min(0).optional().nullable(),
+  rentGrowthRate: z.coerce.number().min(-0.1).max(0.2).optional().nullable(),
+  vacancyRate: z.coerce.number().min(0).max(0.5).optional().nullable(),
+  managementRate: z.coerce.number().min(0).max(0.5).optional().nullable(),
+  annualPropertyTax: z.coerce.number().min(0).optional().nullable(),
+  annualInsurance: z.coerce.number().min(0).optional().nullable(),
+  monthlyHoa: z.coerce.number().min(0).optional().nullable(),
+  monthlyMaintenance: z.coerce.number().min(0).optional().nullable(),
+  confidence: z.coerce.number().min(0).max(1).optional().nullable(),
+  summary: z.string().max(1500).optional().nullable(),
+  methodology: z.string().max(1200).optional().nullable(),
+  source: z.string().max(80).optional().nullable(),
+  asOf: z.string().optional().nullable(),
+  sources: z.array(z.any()).optional().default([]),
+  dataGaps: z.array(z.string()).optional().default([])
+}).optional().nullable();
 
 const styleDefaults = {
   growth: { expectedReturn: 0.08, expectedVolatility: 0.18 },
@@ -47,7 +68,25 @@ const accountSchema = z.object({
   ]).optional().default('keep'),
   retirementTreatmentAge: z.coerce.number().int().min(18).max(120).optional().nullable(),
   retirementCashRelease: z.coerce.number().min(0).optional().nullable(),
-  propertyGrowthRate: z.coerce.number().min(-0.2).max(0.2).optional().default(0.03)
+  propertyGrowthRate: z.coerce.number().min(-0.2).max(0.2).optional().default(0.03),
+  propertyAddress: z.string().max(240).optional().nullable(),
+  propertyZip: z.string().regex(/^\d{5}(?:-\d{4})?$/).optional().nullable(),
+  propertyBedrooms: z.coerce.number().int().min(0).max(20).optional().nullable(),
+  propertyBathrooms: z.coerce.number().min(0).max(20).optional().nullable(),
+  propertyHomeType: z.enum(['single_family', 'condo', 'townhome', 'multi_family', 'apartment', 'other']).optional().default('single_family'),
+  propertySquareFeet: z.coerce.number().int().min(100).max(100000).optional().nullable(),
+  isRentalProperty: z.coerce.boolean().optional().default(false),
+  rentalMonthlyIncome: z.coerce.number().min(0).optional().nullable(),
+  rentalVacancyRate: z.coerce.number().min(0).max(0.5).optional().nullable(),
+  rentalManagementRate: z.coerce.number().min(0).max(0.5).optional().nullable(),
+  rentalAnnualPropertyTax: z.coerce.number().min(0).optional().nullable(),
+  rentalAnnualInsurance: z.coerce.number().min(0).optional().nullable(),
+  rentalMonthlyHoa: z.coerce.number().min(0).optional().nullable(),
+  rentalMonthlyMaintenance: z.coerce.number().min(0).optional().nullable(),
+  rentalRentGrowthRate: z.coerce.number().min(-0.1).max(0.2).optional().nullable(),
+  rentalDepositAccountId: z.string().uuid().optional().nullable(),
+  useAiPropertyEstimate: z.coerce.boolean().optional().default(true),
+  propertyEstimate: propertyEstimateSchema
 }).superRefine((value, ctx) => {
   const method = value.projectionMethod
     || (['brokerage', 'ira'].includes(value.accountType) || value.investmentStyle === 'self_managed'
@@ -67,6 +106,29 @@ const accountSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ['retirementTreatmentAge'],
       message: 'Enter the age for this property scenario'
+    });
+  }
+  if (value.accountType === 'property' && !value.propertyZip) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['propertyZip'],
+      message: 'Enter the property ZIP code'
+    });
+  }
+  if (value.accountType === 'property' && value.isPrimaryResidence && value.isRentalProperty) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['isRentalProperty'],
+      message: 'A property cannot be both the primary residence and a rental property'
+    });
+  }
+  if (value.accountType === 'property' && value.isRentalProperty
+      && !(Number(value.rentalMonthlyIncome) > 0)
+      && !(Number(value.propertyEstimate?.estimatedMonthlyRent) > 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['rentalMonthlyIncome'],
+      message: 'Enter gross monthly rent or run the rental estimate first'
     });
   }
 });
@@ -161,22 +223,220 @@ function normalizeInvestmentProfile(value) {
   };
 }
 
-function normalizePropertyProfile(value) {
+function propertyInput(value) {
+  return {
+    address: value.propertyAddress || null,
+    zipCode: value.propertyZip || null,
+    homeType: value.propertyHomeType || 'single_family',
+    bedrooms: value.propertyBedrooms ?? null,
+    bathrooms: value.propertyBathrooms ?? null,
+    squareFeet: value.propertySquareFeet ?? null,
+    propertyValue: value.currentBalance,
+    monthlyRent: value.rentalMonthlyIncome ?? null,
+    vacancyRate: value.rentalVacancyRate ?? null,
+    managementRate: value.rentalManagementRate ?? null,
+    annualPropertyTax: value.rentalAnnualPropertyTax ?? null,
+    annualInsurance: value.rentalAnnualInsurance ?? null,
+    monthlyHoa: value.rentalMonthlyHoa ?? null,
+    monthlyMaintenance: value.rentalMonthlyMaintenance ?? null,
+    rentGrowthRate: value.rentalRentGrowthRate ?? null,
+    annualAppreciationRate: value.propertyGrowthRate ?? 0.03
+  };
+}
+
+async function resolvePropertyProfile(value, existing = null) {
   if (value.accountType !== 'property') {
     return {
       isPrimaryResidence: false,
       retirementTreatment: 'keep',
       retirementTreatmentAge: null,
       retirementCashRelease: null,
-      propertyGrowthRate: 0.03
+      propertyGrowthRate: 0.03,
+      propertyAddress: null,
+      propertyZip: null,
+      propertyBedrooms: null,
+      propertyBathrooms: null,
+      propertyHomeType: null,
+      propertySquareFeet: null,
+      isRentalProperty: false,
+      propertyGrowthSource: null,
+      propertyGrowthAsOf: null,
+      propertyGrowthConfidence: null,
+      propertyMarketSummary: {},
+      rentalMonthlyIncome: null,
+      rentalVacancyRate: null,
+      rentalManagementRate: null,
+      rentalAnnualPropertyTax: null,
+      rentalAnnualInsurance: null,
+      rentalMonthlyHoa: null,
+      rentalMonthlyMaintenance: null,
+      rentalRentGrowthRate: null,
+      rentalDepositAccountId: null
     };
   }
+
+  const input = propertyInput(value);
+  let estimate = null;
+  if (value.propertyEstimate && String(value.propertyEstimate.zipCode || '') === String(value.propertyZip || '')) {
+    estimate = normalizePropertyEstimate(value.propertyEstimate, input, {
+      source: value.propertyEstimate.source || 'ai_web_research',
+      asOf: value.propertyEstimate.asOf || new Date().toISOString(),
+      sources: value.propertyEstimate.sources || [],
+      dataGaps: value.propertyEstimate.dataGaps || []
+    });
+  } else if (value.useAiPropertyEstimate && value.propertyZip) {
+    estimate = await estimatePropertyMarket(input);
+  } else if (existing?.property_market_summary && Object.keys(existing.property_market_summary || {}).length) {
+    estimate = normalizePropertyEstimate(existing.property_market_summary, input, {
+      source: existing.property_growth_source || 'saved_property_estimate',
+      asOf: existing.property_growth_as_of || new Date().toISOString()
+    });
+  }
+
+  const source = estimate?.source || existing?.property_growth_source || 'user_entered';
+  const asOf = estimate?.asOf || existing?.property_growth_as_of || new Date().toISOString();
+  const confidence = estimate?.confidence ?? existing?.property_growth_confidence ?? null;
+  const growthRate = estimate?.annualAppreciationRate ?? value.propertyGrowthRate ?? existing?.property_growth_rate ?? 0.03;
+  const isRental = Boolean(value.isRentalProperty);
+
   return {
     isPrimaryResidence: Boolean(value.isPrimaryResidence),
     retirementTreatment: value.retirementTreatment || 'keep',
     retirementTreatmentAge: value.retirementTreatmentAge ?? null,
     retirementCashRelease: value.retirementCashRelease ?? null,
-    propertyGrowthRate: value.propertyGrowthRate ?? 0.03
+    propertyGrowthRate: growthRate,
+    propertyAddress: value.propertyAddress || null,
+    propertyZip: value.propertyZip || null,
+    propertyBedrooms: value.propertyBedrooms ?? null,
+    propertyBathrooms: value.propertyBathrooms ?? null,
+    propertyHomeType: value.propertyHomeType || 'single_family',
+    propertySquareFeet: value.propertySquareFeet ?? null,
+    isRentalProperty: isRental,
+    propertyGrowthSource: source,
+    propertyGrowthAsOf: asOf,
+    propertyGrowthConfidence: confidence,
+    propertyMarketSummary: estimate || {
+      zipCode: value.propertyZip,
+      annualAppreciationRate: growthRate,
+      source,
+      asOf,
+      summary: 'User-entered property assumptions.'
+    },
+    rentalMonthlyIncome: isRental
+      ? (value.rentalMonthlyIncome ?? estimate?.estimatedMonthlyRent ?? existing?.rental_monthly_income ?? 0)
+      : null,
+    rentalVacancyRate: isRental
+      ? (value.rentalVacancyRate ?? estimate?.vacancyRate ?? existing?.rental_vacancy_rate ?? 0.05)
+      : null,
+    rentalManagementRate: isRental
+      ? (value.rentalManagementRate ?? estimate?.managementRate ?? existing?.rental_management_rate ?? 0.08)
+      : null,
+    rentalAnnualPropertyTax: isRental
+      ? (value.rentalAnnualPropertyTax ?? estimate?.annualPropertyTax ?? existing?.rental_annual_property_tax ?? 0)
+      : null,
+    rentalAnnualInsurance: isRental
+      ? (value.rentalAnnualInsurance ?? estimate?.annualInsurance ?? existing?.rental_annual_insurance ?? 0)
+      : null,
+    rentalMonthlyHoa: isRental
+      ? (value.rentalMonthlyHoa ?? estimate?.monthlyHoa ?? existing?.rental_monthly_hoa ?? 0)
+      : null,
+    rentalMonthlyMaintenance: isRental
+      ? (value.rentalMonthlyMaintenance ?? estimate?.monthlyMaintenance ?? existing?.rental_monthly_maintenance ?? 0)
+      : null,
+    rentalRentGrowthRate: isRental
+      ? (value.rentalRentGrowthRate ?? estimate?.rentGrowthRate ?? existing?.rental_rent_growth_rate ?? 0.03)
+      : null,
+    rentalDepositAccountId: isRental ? (value.rentalDepositAccountId || null) : null
+  };
+}
+
+async function syncRentalCashFlow(client, householdId, account, property) {
+  if (!property.isRentalProperty || !(Number(property.rentalMonthlyIncome) > 0)) {
+    await client.query(
+      'DELETE FROM income_streams WHERE household_id=$1 AND linked_property_account_id=$2',
+      [householdId, account.id]
+    );
+    await client.query(
+      'DELETE FROM expenses WHERE household_id=$1 AND linked_property_account_id=$2',
+      [householdId, account.id]
+    );
+    return null;
+  }
+
+  const economics = calculateRentalEconomics({
+    propertyValue: account.current_balance,
+    monthlyRent: property.rentalMonthlyIncome,
+    vacancyRate: property.rentalVacancyRate,
+    managementRate: property.rentalManagementRate,
+    annualPropertyTax: property.rentalAnnualPropertyTax,
+    annualInsurance: property.rentalAnnualInsurance,
+    monthlyHoa: property.rentalMonthlyHoa,
+    monthlyMaintenance: property.rentalMonthlyMaintenance
+  });
+  const depositAccountId = property.rentalDepositAccountId || null;
+
+  const incomeResult = await client.query(`
+    INSERT INTO income_streams
+      (household_id, name, income_type, annual_amount, frequency,
+       inflation_rate, taxable, ends_at_retirement, deposit_account_id,
+       linked_property_account_id, notes, updated_at)
+    VALUES ($1,$2,'rental',$3,'monthly',$4,true,false,$5,$6,$7,now())
+    ON CONFLICT (household_id, linked_property_account_id)
+      WHERE linked_property_account_id IS NOT NULL AND income_type='rental'
+    DO UPDATE SET
+      name=EXCLUDED.name,
+      annual_amount=EXCLUDED.annual_amount,
+      frequency='monthly',
+      inflation_rate=EXCLUDED.inflation_rate,
+      taxable=true,
+      ends_at_retirement=false,
+      deposit_account_id=EXCLUDED.deposit_account_id,
+      notes=EXCLUDED.notes,
+      updated_at=now()
+    RETURNING id`, [
+    householdId,
+    `${account.name} gross rent`,
+    Number(property.rentalMonthlyIncome) * 12,
+    Number(property.rentalRentGrowthRate || 0.03),
+    depositAccountId,
+    account.id,
+    'Automatically maintained from the linked rental-property asset.'
+  ]);
+
+  const expenseResult = await client.query(`
+    INSERT INTO expenses
+      (household_id, name, category, annual_amount, frequency,
+       retirement_behavior, inflation_rate, essential, payment_account_id,
+       funding_policy, linked_property_account_id, notes, updated_at)
+    VALUES ($1,$2,'housing',$3,'monthly','same',0.03,true,$4,
+            'linked_then_liquid',$5,$6,now())
+    ON CONFLICT (household_id, linked_property_account_id)
+      WHERE linked_property_account_id IS NOT NULL
+    DO UPDATE SET
+      name=EXCLUDED.name,
+      category='housing',
+      annual_amount=EXCLUDED.annual_amount,
+      frequency='monthly',
+      retirement_behavior='same',
+      inflation_rate=EXCLUDED.inflation_rate,
+      essential=true,
+      payment_account_id=EXCLUDED.payment_account_id,
+      funding_policy='linked_then_liquid',
+      notes=EXCLUDED.notes,
+      updated_at=now()
+    RETURNING id`, [
+    householdId,
+    `${account.name} rental operating costs`,
+    Number(economics.monthlyOperatingExpenses) * 12,
+    depositAccountId,
+    account.id,
+    'Vacancy, management, property tax, insurance, HOA and maintenance assumptions maintained from the linked rental-property asset. Mortgage payments remain a separate liability expense.'
+  ]);
+
+  return {
+    incomeStreamId: incomeResult.rows[0]?.id || null,
+    expenseId: expenseResult.rows[0]?.id || null,
+    economics
   };
 }
 
@@ -280,30 +540,58 @@ accountsRouter.get('/', async (req, res, next) => {
 accountsRouter.post('/', async (req, res, next) => {
   try {
     const value = accountSchema.parse(req.body);
+    if (value.rentalDepositAccountId) {
+      const deposit = await ensureOwnedAccount(value.rentalDepositAccountId, req.householdId);
+      if (deposit.account_type === 'property') {
+        return res.status(400).json({ error: 'Choose a cash or investment account for rental cash flow' });
+      }
+    }
     const profile = normalizeInvestmentProfile(value);
-    const property = normalizePropertyProfile(value);
-    const result = await pool.query(
-      `INSERT INTO accounts
-        (household_id, name, institution, account_type, current_balance, currency,
-         projection_method, investment_style, expected_return, expected_volatility,
-         is_primary_residence, retirement_treatment, retirement_treatment_age,
-         retirement_cash_release, property_growth_rate, last_verified_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now())
-       RETURNING *`,
-      [
-        req.householdId, value.name, value.institution || null, value.accountType,
-        value.currentBalance, value.currency.toUpperCase(), profile.projectionMethod,
-        profile.investmentStyle, profile.expectedReturn, profile.expectedVolatility,
-        property.isPrimaryResidence, property.retirementTreatment,
-        property.retirementTreatmentAge, property.retirementCashRelease,
-        property.propertyGrowthRate
-      ]
-    );
-    const account = result.rows[0];
+    const property = await resolvePropertyProfile(value);
+    const saved = await withTransaction(async (client) => {
+      const result = await client.query(
+        `INSERT INTO accounts
+          (household_id, name, institution, account_type, current_balance, currency,
+           projection_method, investment_style, expected_return, expected_volatility,
+           is_primary_residence, retirement_treatment, retirement_treatment_age,
+           retirement_cash_release, property_growth_rate, property_address,
+           property_zip, property_bedrooms, property_bathrooms, property_home_type,
+           property_square_feet, is_rental_property, property_growth_source,
+           property_growth_as_of, property_growth_confidence, property_market_summary,
+           rental_monthly_income, rental_vacancy_rate, rental_management_rate,
+           rental_annual_property_tax, rental_annual_insurance, rental_monthly_hoa,
+           rental_monthly_maintenance, rental_rent_growth_rate,
+           rental_deposit_account_id, last_verified_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+                 $17,$18,$19,$20,$21,$22,$23,$24::timestamptz,$25,$26::jsonb,
+                 $27,$28,$29,$30,$31,$32,$33,$34,$35,now())
+         RETURNING *`, [
+          req.householdId, value.name, value.institution || null, value.accountType,
+          value.currentBalance, value.currency.toUpperCase(), profile.projectionMethod,
+          profile.investmentStyle, profile.expectedReturn, profile.expectedVolatility,
+          property.isPrimaryResidence, property.retirementTreatment,
+          property.retirementTreatmentAge, property.retirementCashRelease,
+          property.propertyGrowthRate, property.propertyAddress, property.propertyZip,
+          property.propertyBedrooms, property.propertyBathrooms, property.propertyHomeType,
+          property.propertySquareFeet, property.isRentalProperty,
+          property.propertyGrowthSource, property.propertyGrowthAsOf,
+          property.propertyGrowthConfidence, JSON.stringify(property.propertyMarketSummary || {}),
+          property.rentalMonthlyIncome, property.rentalVacancyRate,
+          property.rentalManagementRate, property.rentalAnnualPropertyTax,
+          property.rentalAnnualInsurance, property.rentalMonthlyHoa,
+          property.rentalMonthlyMaintenance, property.rentalRentGrowthRate,
+          property.rentalDepositAccountId
+        ]
+      );
+      const account = result.rows[0];
+      const rentalCashFlow = await syncRentalCashFlow(client, req.householdId, account, property);
+      return { account, rentalCashFlow };
+    });
     res.status(201).json({
-      ...account,
-      requiresPortfolioSetup: investmentAccountTypes.has(account.account_type)
-        && account.projection_method === 'holdings_monte_carlo'
+      ...saved.account,
+      rentalCashFlow: saved.rentalCashFlow,
+      requiresPortfolioSetup: investmentAccountTypes.has(saved.account.account_type)
+        && saved.account.projection_method === 'holdings_monte_carlo'
     });
   } catch (error) { next(error); }
 });
@@ -311,43 +599,84 @@ accountsRouter.post('/', async (req, res, next) => {
 accountsRouter.put('/:id', async (req, res, next) => {
   try {
     const value = accountSchema.parse(req.body);
+    const existing = await ensureOwnedAccount(req.params.id, req.householdId);
+    if (value.rentalDepositAccountId) {
+      const deposit = await ensureOwnedAccount(value.rentalDepositAccountId, req.householdId);
+      if (deposit.account_type === 'property' || deposit.id === req.params.id) {
+        return res.status(400).json({ error: 'Choose a different cash or investment account for rental cash flow' });
+      }
+    }
     const profile = normalizeInvestmentProfile(value);
-    const property = normalizePropertyProfile(value);
-    const result = await pool.query(
-      `UPDATE accounts
-       SET name = $1,
-           institution = $2,
-           account_type = $3,
-           current_balance = $4,
-           currency = $5,
-           projection_method = $6,
-           investment_style = $7,
-           expected_return = $8,
-           expected_volatility = $9,
-           forecast_expected_return = CASE WHEN $6 = 'profile' THEN NULL ELSE forecast_expected_return END,
-           forecast_volatility = CASE WHEN $6 = 'profile' THEN NULL ELSE forecast_volatility END,
-           forecast_as_of = CASE WHEN $6 = 'profile' THEN NULL ELSE forecast_as_of END,
-           forecast_source = CASE WHEN $6 = 'profile' THEN NULL ELSE forecast_source END,
-           is_primary_residence = $10,
-           retirement_treatment = $11,
-           retirement_treatment_age = $12,
-           retirement_cash_release = $13,
-           property_growth_rate = $14,
-           last_verified_at = now(),
-           updated_at = now()
-       WHERE id = $15 AND household_id = $16
-       RETURNING *`,
-      [
-        value.name, value.institution || null, value.accountType,
-        value.currentBalance, value.currency.toUpperCase(), profile.projectionMethod,
-        profile.investmentStyle, profile.expectedReturn, profile.expectedVolatility,
-        property.isPrimaryResidence, property.retirementTreatment,
-        property.retirementTreatmentAge, property.retirementCashRelease,
-        property.propertyGrowthRate, req.params.id, req.householdId
-      ]
-    );
-    if (!result.rowCount) return res.status(404).json({ error: 'Account not found' });
-    res.json(result.rows[0]);
+    const property = await resolvePropertyProfile(value, existing);
+    const saved = await withTransaction(async (client) => {
+      const result = await client.query(
+        `UPDATE accounts
+         SET name = $1,
+             institution = $2,
+             account_type = $3,
+             current_balance = $4,
+             currency = $5,
+             projection_method = $6,
+             investment_style = $7,
+             expected_return = $8,
+             expected_volatility = $9,
+             forecast_expected_return = CASE WHEN $6 = 'profile' THEN NULL ELSE forecast_expected_return END,
+             forecast_volatility = CASE WHEN $6 = 'profile' THEN NULL ELSE forecast_volatility END,
+             forecast_as_of = CASE WHEN $6 = 'profile' THEN NULL ELSE forecast_as_of END,
+             forecast_source = CASE WHEN $6 = 'profile' THEN NULL ELSE forecast_source END,
+             is_primary_residence = $10,
+             retirement_treatment = $11,
+             retirement_treatment_age = $12,
+             retirement_cash_release = $13,
+             property_growth_rate = $14,
+             property_address = $15,
+             property_zip = $16,
+             property_bedrooms = $17,
+             property_bathrooms = $18,
+             property_home_type = $19,
+             property_square_feet = $20,
+             is_rental_property = $21,
+             property_growth_source = $22,
+             property_growth_as_of = $23::timestamptz,
+             property_growth_confidence = $24,
+             property_market_summary = $25::jsonb,
+             rental_monthly_income = $26,
+             rental_vacancy_rate = $27,
+             rental_management_rate = $28,
+             rental_annual_property_tax = $29,
+             rental_annual_insurance = $30,
+             rental_monthly_hoa = $31,
+             rental_monthly_maintenance = $32,
+             rental_rent_growth_rate = $33,
+             rental_deposit_account_id = $34,
+             last_verified_at = now(),
+             updated_at = now()
+         WHERE id = $35 AND household_id = $36
+         RETURNING *`, [
+          value.name, value.institution || null, value.accountType,
+          value.currentBalance, value.currency.toUpperCase(), profile.projectionMethod,
+          profile.investmentStyle, profile.expectedReturn, profile.expectedVolatility,
+          property.isPrimaryResidence, property.retirementTreatment,
+          property.retirementTreatmentAge, property.retirementCashRelease,
+          property.propertyGrowthRate, property.propertyAddress, property.propertyZip,
+          property.propertyBedrooms, property.propertyBathrooms, property.propertyHomeType,
+          property.propertySquareFeet, property.isRentalProperty,
+          property.propertyGrowthSource, property.propertyGrowthAsOf,
+          property.propertyGrowthConfidence, JSON.stringify(property.propertyMarketSummary || {}),
+          property.rentalMonthlyIncome, property.rentalVacancyRate,
+          property.rentalManagementRate, property.rentalAnnualPropertyTax,
+          property.rentalAnnualInsurance, property.rentalMonthlyHoa,
+          property.rentalMonthlyMaintenance, property.rentalRentGrowthRate,
+          property.rentalDepositAccountId, req.params.id, req.householdId
+        ]
+      );
+      if (!result.rowCount) return null;
+      const account = result.rows[0];
+      const rentalCashFlow = await syncRentalCashFlow(client, req.householdId, account, property);
+      return { account, rentalCashFlow };
+    });
+    if (!saved) return res.status(404).json({ error: 'Account not found' });
+    res.json({ ...saved.account, rentalCashFlow: saved.rentalCashFlow });
   } catch (error) { next(error); }
 });
 

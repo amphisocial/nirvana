@@ -1,0 +1,166 @@
+.property-profile {
+  gap: .95rem;
+}
+
+.property-type-checks,
+.property-estimate-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+
+.property-detail-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.property-estimate-status {
+  padding: .8rem .9rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--blue-pale);
+  color: var(--ink-soft);
+  font-size: .88rem;
+  line-height: 1.45;
+}
+
+.property-estimate-status.success {
+  border-color: rgba(25, 118, 197, .35);
+  color: var(--blue-dark);
+}
+
+.property-estimate-status.warning {
+  background: #fff8e8;
+  border-color: #edd59b;
+  color: #76520a;
+}
+
+.rental-property-fields {
+  display: grid;
+  gap: .9rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: linear-gradient(145deg, #f7fbff, #fff);
+}
+
+.rental-property-fields.hidden {
+  display: none;
+}
+
+.rental-economics-inline {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .65rem;
+}
+
+.rental-economics-inline > div,
+.rental-estimate-metrics > div {
+  padding: .75rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.rental-economics-inline span,
+.rental-estimate-metrics span {
+  display: block;
+  color: var(--ink-soft);
+  font-size: .76rem;
+}
+
+.rental-economics-inline strong,
+.rental-estimate-metrics strong {
+  display: block;
+  margin-top: .25rem;
+  color: var(--blue-dark);
+  font-size: 1rem;
+}
+
+.real-estate-whatif-grid {
+  display: grid;
+  grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr);
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.real-estate-calculator-card,
+.real-estate-scenario-card {
+  min-width: 0;
+}
+
+.real-estate-assumption-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .75rem;
+}
+
+.rental-estimate-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .65rem;
+  margin-top: .85rem;
+}
+
+.real-estate-metrics {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.real-estate-chart-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.real-estate-chart-grid > :last-child {
+  grid-column: 1 / -1;
+}
+
+.real-estate-funding-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .6rem;
+}
+
+.real-estate-funding-summary > div {
+  padding: .7rem .8rem;
+  border-radius: 12px;
+  background: var(--blue-pale);
+}
+
+.real-estate-funding-summary span {
+  display: block;
+  color: var(--ink-soft);
+  font-size: .74rem;
+}
+
+.real-estate-funding-summary strong {
+  display: block;
+  margin-top: .2rem;
+  color: var(--blue-dark);
+}
+
+@media (max-width: 1100px) {
+  .real-estate-whatif-grid,
+  .real-estate-chart-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .real-estate-chart-grid > :last-child {
+    grid-column: auto;
+  }
+
+  .real-estate-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .property-detail-row,
+  .real-estate-assumption-grid,
+  .rental-economics-inline,
+  .rental-estimate-metrics,
+  .real-estate-funding-summary,
+  .real-estate-metrics {
+    grid-template-columns: 1fr;
+  }
+}

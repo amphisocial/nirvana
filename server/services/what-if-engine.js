@@ -208,6 +208,181 @@ function expenseAmountAfterPayoff(expense, amount, state, paidLiabilityIds) {
   return 0;
 }
 
+
+export function calculateMonthlyMortgagePayment(principal, annualRate, termMonths) {
+  const amount = Math.max(0, number(principal));
+  const months = Math.max(1, Math.floor(number(termMonths, 360)));
+  const monthlyRate = Math.max(0, number(annualRate)) / 12;
+  if (amount <= 0) return 0;
+  if (monthlyRate <= 0) return amount / months;
+  return amount * monthlyRate / (1 - ((1 + monthlyRate) ** -months));
+}
+
+function scenarioPropertyId(index) {
+  return `scenario-property-${index}`;
+}
+
+function scenarioMortgageId(index) {
+  return `scenario-mortgage-${index}`;
+}
+
+function propertyPurchaseAtAge(state, propertyPurchases, age, events) {
+  let cashInvested = 0;
+  let fundingShortfall = 0;
+  let propertyValueAdded = 0;
+  let mortgageAdded = 0;
+
+  (propertyPurchases || []).forEach((action, index) => {
+    const purchaseAge = Math.floor(number(action.purchaseAge, -1));
+    if (purchaseAge !== age) return;
+    const propertyId = action.propertyId || scenarioPropertyId(index);
+    if (state.accounts.has(propertyId)) return;
+
+    const propertyValue = Math.max(0, number(action.propertyValue));
+    const closingCosts = Math.max(0, number(action.closingCosts));
+    const totalCost = propertyValue + closingCosts;
+    const requestedMortgage = Math.max(0, number(action.mortgageAmount));
+    const cashRequired = Math.max(0, totalCost - requestedMortgage);
+    let remainingCash = cashRequired;
+
+    for (const sourceAction of action.fundingSources || []) {
+      if (remainingCash <= 0) break;
+      const source = state.accounts.get(sourceAction.accountId);
+      if (!source) {
+        events.push(`Funding source unavailable: ${sourceAction.accountName || sourceAction.accountId}`);
+        continue;
+      }
+      const requested = Math.max(0, number(sourceAction.amount));
+      const applied = Math.min(requested, remainingCash);
+      const availableBefore = Math.max(0, source.balance);
+      source.balance -= applied;
+      cashInvested += applied;
+      fundingShortfall += Math.max(0, applied - availableBefore);
+      remainingCash -= applied;
+      events.push(`${round(applied)} liquidated from ${source.name} for the rental purchase`);
+    }
+
+    if (remainingCash > 0) {
+      const fallback = findDefaultAccount(state);
+      if (fallback) {
+        const availableBefore = Math.max(0, fallback.balance);
+        fallback.balance -= remainingCash;
+        fundingShortfall += Math.max(0, remainingCash - availableBefore);
+        cashInvested += remainingCash;
+        events.push(`${round(remainingCash)} additional cash required from ${fallback.name}`);
+      } else {
+        fundingShortfall += remainingCash;
+      }
+      remainingCash = 0;
+    }
+
+    state.accounts.set(propertyId, {
+      id: propertyId,
+      name: action.name || 'Scenario rental property',
+      account_type: 'property',
+      current_balance: propertyValue,
+      balance: propertyValue,
+      property_growth_rate: clamp(number(action.annualAppreciationRate, 0.03), -0.2, 0.2),
+      is_rental_property: true,
+      scenario_property: true
+    });
+    propertyValueAdded += propertyValue;
+
+    if (requestedMortgage > 0) {
+      const mortgageId = action.mortgageId || scenarioMortgageId(index);
+      const termMonths = Math.max(1, Math.floor(number(action.mortgageTermMonths, 360)));
+      const interestRate = Math.max(0, number(action.mortgageInterestRate));
+      const payment = Math.max(0, number(
+        action.monthlyMortgagePayment,
+        calculateMonthlyMortgagePayment(requestedMortgage, interestRate, termMonths)
+      ));
+      state.liabilities.set(mortgageId, {
+        id: mortgageId,
+        name: `${action.name || 'Scenario rental property'} mortgage`,
+        liability_type: 'mortgage',
+        original_amount: requestedMortgage,
+        current_balance: requestedMortgage,
+        balance: requestedMortgage,
+        interest_rate: interestRate,
+        original_term_months: termMonths,
+        current_term_month: 0,
+        principal_interest_payment: payment,
+        monthly_payment: payment,
+        linked_account_id: propertyId,
+        scenario_property: true
+      });
+      mortgageAdded += requestedMortgage;
+    }
+
+    events.push(`${action.name || 'Rental property'} purchased for ${round(propertyValue)}${closingCosts ? ` plus ${round(closingCosts)} closing costs` : ''}`);
+  });
+
+  return { cashInvested, fundingShortfall, propertyValueAdded, mortgageAdded };
+}
+
+function scenarioRentalCashFlow(state, propertyPurchases, age, effectiveTaxRate) {
+  let grossAnnual = 0;
+  let afterTaxAnnual = 0;
+  let operatingAnnual = 0;
+  let mortgageAnnual = 0;
+  const incomeItems = [];
+  const expenseItems = [];
+
+  (propertyPurchases || []).forEach((action, index) => {
+    const purchaseAge = Math.floor(number(action.purchaseAge, -1));
+    if (age < purchaseAge) return;
+    const propertyId = action.propertyId || scenarioPropertyId(index);
+    if (!state.accounts.has(propertyId)) return;
+    const years = Math.max(0, age - purchaseAge);
+    const rentGrowth = clamp(number(action.rentGrowthRate, 0.03), -0.1, 0.2);
+    const expenseGrowth = clamp(number(action.expenseGrowthRate, 0.03), -0.1, 0.2);
+    const annualRent = Math.max(0, number(action.monthlyRent)) * 12 * ((1 + rentGrowth) ** years);
+    const vacancy = annualRent * clamp(number(action.vacancyRate, 0.05), 0, 0.5);
+    const management = annualRent * clamp(number(action.managementRate, 0.08), 0, 0.5);
+    const fixedAnnual = (
+      Math.max(0, number(action.annualPropertyTax))
+      + Math.max(0, number(action.annualInsurance))
+      + Math.max(0, number(action.monthlyHoa)) * 12
+      + Math.max(0, number(action.monthlyMaintenance)) * 12
+    ) * ((1 + expenseGrowth) ** years);
+    const annualOperating = vacancy + management + fixedAnnual;
+    const mortgage = state.liabilities.get(action.mortgageId || scenarioMortgageId(index));
+    const annualMortgage = mortgage && mortgage.balance > 0
+      ? Math.max(0, number(mortgage.principal_interest_payment || mortgage.monthly_payment)) * 12
+      : 0;
+    const annualAfterTax = annualRent * (1 - clamp(number(effectiveTaxRate, 0.15), 0, 0.6));
+
+    grossAnnual += annualRent;
+    afterTaxAnnual += annualAfterTax;
+    operatingAnnual += annualOperating;
+    mortgageAnnual += annualMortgage;
+
+    incomeItems.push({
+      item: { deposit_account_id: action.depositAccountId || null, scenario_property: true },
+      afterTax: annualAfterTax
+    });
+    if (annualOperating + annualMortgage > 0) {
+      expenseItems.push({
+        item: {
+          payment_account_id: action.depositAccountId || null,
+          funding_policy: 'linked_then_liquid',
+          scenario_property: true
+        },
+        amount: annualOperating + annualMortgage
+      });
+    }
+  });
+
+  return {
+    grossAnnual,
+    afterTaxAnnual,
+    operatingAnnual,
+    mortgageAnnual,
+    incomeItems,
+    expenseItems
+  };
+}
+
 function payoffTargetsAtAge(state, payoffActions, age, events, paidLiabilityIds) {
   let totalPaid = 0;
   let totalShortfall = 0;
@@ -397,6 +572,7 @@ function simulate(data, scenario = {}) {
   const currentYear = Math.floor(number(scenario.currentYear, new Date().getUTCFullYear()));
   const trackedAccountId = scenario.trackingAccountId
     || scenario.payoffActions?.[0]?.sourceAccountId
+    || scenario.propertyPurchases?.[0]?.fundingSources?.[0]?.accountId
     || null;
   const state = cloneState(data);
   const paidLiabilityIds = new Set();
@@ -404,11 +580,27 @@ function simulate(data, scenario = {}) {
   let cumulativeShortfall = 0;
   let cumulativePayoffShortfall = 0;
   let cumulativePayoff = 0;
+  let cumulativePropertyFundingShortfall = 0;
+  let cumulativePropertyCashInvested = 0;
+  let propertyValueAdded = 0;
+  let mortgageAdded = 0;
 
   for (let age = currentAge; age <= endAge; age += 1) {
     const yearOffset = age - currentAge;
     const projectionYear = currentYear + yearOffset;
     const events = [];
+
+    const purchase = propertyPurchaseAtAge(
+      state,
+      scenario.propertyPurchases || [],
+      age,
+      events
+    );
+    cumulativePropertyFundingShortfall += purchase.fundingShortfall;
+    cumulativePropertyCashInvested += purchase.cashInvested;
+    propertyValueAdded += purchase.propertyValueAdded;
+    mortgageAdded += purchase.mortgageAdded;
+    cumulativeShortfall += purchase.fundingShortfall;
 
     const payoff = payoffTargetsAtAge(
       state,
@@ -422,6 +614,16 @@ function simulate(data, scenario = {}) {
     cumulativeShortfall += payoff.totalShortfall;
 
     const income = householdIncomeForAge(data, age, currentAge, retirementAge, currentYear);
+    const rental = scenarioRentalCashFlow(
+      state,
+      scenario.propertyPurchases || [],
+      age,
+      number(data.plan?.effective_tax_rate, 0.15)
+    );
+    income.gross += rental.grossAnnual;
+    income.afterTax += rental.afterTaxAnnual;
+    income.items.push(...rental.incomeItems);
+
     const expenses = householdExpensesForAge(
       data,
       state,
@@ -431,6 +633,8 @@ function simulate(data, scenario = {}) {
       currentYear,
       paidLiabilityIds
     );
+    expenses.total += rental.operatingAnnual + rental.mortgageAnnual;
+    expenses.items.push(...rental.expenseItems);
     const summary = summarizeState(state);
 
     timeline.push({
@@ -441,6 +645,10 @@ function simulate(data, scenario = {}) {
       monthlyExpensesExcluding529: round((expenses.total - expenses.from529) / 12),
       monthly529Expenses: round(expenses.from529 / 12),
       monthlyNetCashFlow: round((income.afterTax - expenses.total) / 12),
+      scenarioMonthlyRentalIncome: round(rental.afterTaxAnnual / 12),
+      scenarioMonthlyGrossRent: round(rental.grossAnnual / 12),
+      scenarioMonthlyPropertyExpenses: round(rental.operatingAnnual / 12),
+      scenarioMonthlyMortgagePayment: round(rental.mortgageAnnual / 12),
       annualExternalContributions: 0,
       annualTransfers: 0,
       savingsInvestments: round(summary.savingsInvestments),
@@ -485,7 +693,11 @@ function simulate(data, scenario = {}) {
     timeline,
     cumulativeShortfall: round(cumulativeShortfall),
     cumulativePayoffShortfall: round(cumulativePayoffShortfall),
-    cumulativePayoff: round(cumulativePayoff)
+    cumulativePayoff: round(cumulativePayoff),
+    cumulativePropertyFundingShortfall: round(cumulativePropertyFundingShortfall),
+    cumulativePropertyCashInvested: round(cumulativePropertyCashInvested),
+    propertyValueAdded: round(propertyValueAdded),
+    mortgageAdded: round(mortgageAdded)
   };
 }
 
@@ -518,6 +730,7 @@ export function simulateHouseholdWhatIf(data, scenario = {}) {
       summary: scenario.summary || 'Temporary assumptions applied to the current plan.',
       payoffActions: scenario.payoffActions || [],
       returnPhases: scenario.returnPhases || [],
+      propertyPurchases: scenario.propertyPurchases || [],
       notes: scenario.notes || []
     },
     baseline,
@@ -532,9 +745,17 @@ export function simulateHouseholdWhatIf(data, scenario = {}) {
       netWorthAtEndBaseline: round(baselineEnd?.netWorth),
       netWorthAtEndScenario: round(scenarioEnd?.netWorth),
       netWorthAtEndChange: round(number(scenarioEnd?.netWorth) - number(baselineEnd?.netWorth)),
-      scenarioFundingShortfall: alternative.cumulativePayoffShortfall,
+      scenarioFundingShortfall: round(
+        alternative.cumulativePayoffShortfall + alternative.cumulativePropertyFundingShortfall
+      ),
+      propertyFundingShortfall: alternative.cumulativePropertyFundingShortfall,
+      propertyCashInvested: alternative.cumulativePropertyCashInvested,
+      propertyValueAdded: alternative.propertyValueAdded,
+      propertyMortgageAdded: alternative.mortgageAdded,
       scenarioOtherFundingShortfall: round(
-        alternative.cumulativeShortfall - alternative.cumulativePayoffShortfall
+        alternative.cumulativeShortfall
+          - alternative.cumulativePayoffShortfall
+          - alternative.cumulativePropertyFundingShortfall
       ),
       fundingAccountMinimumBalance: round(Math.min(
         ...alternative.timeline.map((row) => number(row.fundingAccountBalance))

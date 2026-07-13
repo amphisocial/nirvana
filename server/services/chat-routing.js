@@ -66,5 +66,8 @@ export function selectSkillNames(message) {
   if (/(what changed|this week|weekly brief|nirvana'?s desk|alert|drift|dividend|interest calendar|actual spending|planned spending|goal progress|partner|shared household)/i.test(message)) {
     names.push('financial-intelligence-agent');
   }
+  if (/(real estate|rental property|rental income|landlord|cap rate|cash[- ]on[- ]cash|vacancy|property appreciation|property tax|buy a property|buy property|mortgage.*rental|zip code.*rent)/i.test(message)) {
+    names.push('real-estate-scenario-analyst');
+  }
   return [...new Set(names)];
 }

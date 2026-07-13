@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/what-if.css?v=0.6.0">
   <link rel="stylesheet" href="/holdings.css?v=0.7.1">
   <link rel="stylesheet" href="/intelligence.css?v=0.8.1">
+  <link rel="stylesheet" href="/real-estate.css?v=0.9.0">
 </head>
 <body class="app-body">
   <aside class="sidebar" id="appSidebar">
@@ -201,6 +202,7 @@
 
     <div class="whatif-tabs" role="tablist" aria-label="What-if modes">
       <button class="whatif-tab active" type="button" data-whatif-tab="household" role="tab" aria-selected="true">Household plan</button>
+      <button class="whatif-tab" type="button" data-whatif-tab="rental" role="tab" aria-selected="false">Rental Property</button>
       <button class="whatif-tab whatif-link-tab" type="button" data-view-link="holdings">Open Holdings Lab</button>
     </div>
 
@@ -251,6 +253,70 @@
           <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">CASH FLOW</span><h2>Income and expenses</h2></div></div><div class="chart-wrap whatif-chart-wrap"><canvas id="whatIfCashflowChart"></canvas></div></article>
           <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">NET WORTH</span><h2>Baseline versus scenario</h2></div></div><div class="chart-wrap whatif-chart-wrap"><canvas id="whatIfNetWorthChart"></canvas></div></article>
           <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">DEBT AND FUNDING</span><h2>Debt balance versus stock accounts</h2></div></div><div class="chart-wrap whatif-chart-wrap"><canvas id="whatIfDebtChart"></canvas></div></article>
+        </div>
+      </div>
+    </div>
+
+    <div class="whatif-tab-panel" data-whatif-panel="rental">
+      <div class="real-estate-whatif-grid">
+        <article class="panel form-panel real-estate-calculator-card">
+          <div class="panel-head"><div><span class="panel-kicker">QUICK RENTAL CALCULATOR</span><h2>Research the property and estimate rent</h2></div><span class="status-pill neutral">AI + web research</span></div>
+          <form id="rentalEstimateForm" class="stack-form">
+            <label>Address<input name="address" maxlength="240" placeholder="Optional street address"></label>
+            <div class="form-row"><label>ZIP code<input name="zipCode" inputmode="numeric" maxlength="10" placeholder="Address or ZIP required"></label><label>Home type<select name="homeType"><option value="single_family">Single-family</option><option value="condo">Condo</option><option value="townhome">Townhome</option><option value="multi_family">Multi-family</option><option value="apartment">Apartment</option><option value="other">Other</option></select></label></div>
+            <div class="form-row property-detail-row"><label>Bedrooms<input name="bedrooms" type="number" min="0" max="20" step="1"></label><label>Bathrooms<input name="bathrooms" type="number" min="0" max="20" step="0.5"></label><label>Square feet<input name="squareFeet" type="number" min="100" max="100000"></label></div>
+            <label>Property value / purchase price<input name="propertyValue" type="number" min="1" step="1000" required></label>
+            <button id="runRentalEstimate" class="button button-secondary" type="submit">✦ Estimate local rent and growth</button>
+          </form>
+          <div id="rentalEstimateStatus" class="property-estimate-status">No estimate has been run yet.</div>
+          <div id="rentalEstimateMetrics" class="rental-estimate-metrics"></div>
+          <div id="rentalEstimateSources" class="source-list"></div>
+        </article>
+
+        <article class="panel form-panel real-estate-scenario-card">
+          <div class="panel-head"><div><span class="panel-kicker">TEMPORARY PURCHASE SCENARIO</span><h2>Fund and buy a rental property</h2></div><span class="whatif-session-badge">Nothing saved</span></div>
+          <form id="rentalScenarioForm" class="stack-form">
+            <label>Scenario property name<input name="name" value="Scenario rental property" required></label>
+            <div class="form-row"><label>Purchase at age<input name="purchaseAge" type="number" min="18" max="120" required></label><label>Forecast horizon<select name="horizonYears"><option value="5">5 years</option><option value="10" selected>10 years</option><option value="20">20 years</option><option value="30">30 years</option></select></label></div>
+            <div class="form-row"><label>Purchase price<input name="propertyValue" type="number" min="1" step="1000" required></label><label>Closing costs %<input name="closingCostPct" type="number" min="0" max="20" step="0.1" value="3.0"></label></div>
+            <div class="real-estate-assumption-grid">
+              <label>Gross monthly rent<input name="monthlyRent" type="number" min="0" step="1" required></label>
+              <label>Annual appreciation %<input name="annualAppreciationPct" type="number" min="-20" max="20" step="0.1" value="3.0"></label>
+              <label>Annual rent growth %<input name="rentGrowthPct" type="number" min="-10" max="20" step="0.1" value="3.0"></label>
+              <label>Vacancy %<input name="vacancyPct" type="number" min="0" max="50" step="0.1" value="5.0"></label>
+              <label>Management %<input name="managementPct" type="number" min="0" max="50" step="0.1" value="8.0"></label>
+              <label>Annual property tax<input name="annualPropertyTax" type="number" min="0" step="1"></label>
+              <label>Annual insurance<input name="annualInsurance" type="number" min="0" step="1"></label>
+              <label>Monthly HOA<input name="monthlyHoa" type="number" min="0" step="1" value="0"></label>
+              <label>Monthly maintenance<input name="monthlyMaintenance" type="number" min="0" step="1"></label>
+            </div>
+            <div class="profile-intro"><strong>Liquidate existing assets</strong><small>Choose up to two accounts. The modeled withdrawal occurs at the purchase age; taxes and retirement penalties are excluded.</small></div>
+            <div class="form-row"><label>Funding account 1<select name="fundingAccountId1" id="rentalFundingAccount1"><option value="">Choose account</option></select></label><label>Amount<input name="fundingAmount1" type="number" min="0" step="1000" value="200000"></label></div>
+            <div class="form-row"><label>Funding account 2<select name="fundingAccountId2" id="rentalFundingAccount2"><option value="">Optional second account</option></select></label><label>Amount<input name="fundingAmount2" type="number" min="0" step="1000"></label></div>
+            <div class="profile-intro"><strong>Mortgage funding</strong><small>Leave mortgage amount blank to fund the remaining purchase cost automatically.</small></div>
+            <div class="form-row"><label>Mortgage amount<input name="mortgageAmount" type="number" min="0" step="1000" placeholder="Auto-calculate differential"></label><label>Interest rate %<input name="mortgageInterestRatePct" type="number" min="0" max="50" step="0.01" value="6.5"></label></div>
+            <div class="form-row"><label>Mortgage term<select name="mortgageTermMonths"><option value="180">15 years</option><option value="240">20 years</option><option value="360" selected>30 years</option></select></label><label>Monthly P&amp;I<input name="monthlyMortgagePayment" type="number" min="0" step="1" placeholder="Auto-calculate"></label></div>
+            <label>Rental cash account<select name="depositAccountId" id="rentalScenarioDepositAccount"><option value="">Use default cash account</option></select></label>
+            <input name="address" type="hidden"><input name="zipCode" type="hidden"><input name="homeType" type="hidden"><input name="bedrooms" type="hidden"><input name="bathrooms" type="hidden"><input name="squareFeet" type="hidden">
+            <div class="form-actions"><button id="runRentalScenario" class="button button-primary" type="submit">Run rental-property what-if</button><button id="resetRentalScenario" class="button button-secondary" type="button">Reset</button></div>
+          </form>
+        </article>
+      </div>
+
+      <div id="rentalScenarioEmpty" class="whatif-empty"><div><strong>Build a temporary rental-property purchase</strong>Estimate the local market, choose funding accounts and run the scenario to compare cash flow, real estate, mortgage debt and net worth.</div></div>
+      <div id="rentalScenarioResults" class="hidden">
+        <article class="whatif-scenario-card"><div class="whatif-scenario-head"><div><h3 id="rentalScenarioTitle">Rental-property scenario</h3><p id="rentalScenarioSummary"></p></div><span class="whatif-persistence">Temporary analysis only</span></div><div id="rentalScenarioAssumptions" class="whatif-assumptions"></div><div id="rentalScenarioFundingGap" class="whatif-shortfall"></div></article>
+        <div class="metric-grid real-estate-metrics">
+          <article class="metric-card metric-featured"><span>Monthly rental cash flow</span><strong id="rentalMonthlyCashFlow">—</strong><small>Rent minus operating costs and mortgage</small></article>
+          <article class="metric-card"><span>Cap rate</span><strong id="rentalCapRate">—</strong><small>NOI divided by property value</small></article>
+          <article class="metric-card"><span>Cash-on-cash return</span><strong id="rentalCashOnCash">—</strong><small>Before income taxes and sale costs</small></article>
+          <article class="metric-card"><span>Net-worth change at horizon</span><strong id="rentalNetWorthChange">—</strong><small>Scenario minus baseline</small></article>
+          <article class="metric-card"><span>Mortgage added</span><strong id="rentalMortgageAdded">—</strong><small>Temporary scenario liability</small></article>
+        </div>
+        <div class="whatif-chart-grid real-estate-chart-grid">
+          <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">CASH FLOW</span><h2>Baseline and scenario income &amp; expenses</h2></div></div><div class="chart-wrap whatif-chart-wrap"><canvas id="realEstateCashflowChart"></canvas></div><p class="chart-note">Blue lines are income; red lines are expenses. Darker shades represent the rental scenario.</p></article>
+          <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">NET WORTH</span><h2>Baseline versus rental purchase</h2></div></div><div class="chart-wrap whatif-chart-wrap"><canvas id="realEstateNetWorthChart"></canvas></div></article>
+          <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">PROPERTY &amp; DEBT</span><h2>Real estate value and total debt</h2></div></div><div class="chart-wrap whatif-chart-wrap"><canvas id="realEstateAssetDebtChart"></canvas></div></article>
         </div>
       </div>
     </div>
@@ -581,11 +647,27 @@
               <div class="form-row"><label>Fallback annual growth %<input name="expectedReturnPct" id="expectedReturnPct" type="number" min="-50" max="50" step="0.1" value="6.0"></label><label>Fallback volatility %<input name="expectedVolatilityPct" id="expectedVolatilityPct" type="number" min="0" max="100" step="0.1" value="12.0"></label></div>
               <p id="investmentProfileHint" class="mini-disclaimer">These values are used until a holdings forecast is calculated.</p>
             </div>
-            <div id="propertyProfileFields" class="investment-profile hidden">
-              <div class="profile-intro"><strong>How should Nirvana treat this property?</strong><small>A primary home counts in net worth but not retirement funding unless you define a cash release.</small></div>
-              <label class="check-label"><input name="isPrimaryResidence" type="checkbox"> This is my primary residence</label>
+            <div id="propertyProfileFields" class="investment-profile property-profile hidden">
+              <div class="profile-intro"><strong>Property profile and local-market estimate</strong><small>Nirvana uses the ZIP code and property details to research a bounded appreciation and rental-income planning estimate. Verify all values locally.</small></div>
+              <label>Street address<input name="propertyAddress" maxlength="240" placeholder="Optional street address"></label>
+              <div class="form-row"><label>ZIP code<input name="propertyZip" id="propertyZip" inputmode="numeric" maxlength="10" placeholder="01845"></label><label>Home type<select name="propertyHomeType"><option value="single_family">Single-family</option><option value="condo">Condo</option><option value="townhome">Townhome</option><option value="multi_family">Multi-family</option><option value="apartment">Apartment</option><option value="other">Other</option></select></label></div>
+              <div class="form-row property-detail-row"><label>Bedrooms<input name="propertyBedrooms" type="number" min="0" max="20" step="1"></label><label>Bathrooms<input name="propertyBathrooms" type="number" min="0" max="20" step="0.5"></label><label>Square feet<input name="propertySquareFeet" type="number" min="100" max="100000" step="1"></label></div>
+              <div class="property-type-checks"><label class="check-label"><input name="isPrimaryResidence" type="checkbox"> Primary residence</label><label class="check-label"><input name="isRentalProperty" id="isRentalProperty" type="checkbox"> Rental property</label></div>
+              <div class="property-estimate-toolbar"><label class="check-label"><input name="useAiPropertyEstimate" type="checkbox" checked> Refresh ZIP estimate when saved</label><button id="estimateSavedProperty" class="button button-secondary" type="button">✦ Estimate growth &amp; rent</button></div>
+              <input name="propertyEstimatePayload" id="propertyEstimatePayload" type="hidden">
+              <div id="propertyEstimateStatus" class="property-estimate-status">Enter a ZIP code and property value, then estimate. Saving can also run the estimate automatically.</div>
+              <label>Annual property appreciation %<input name="propertyGrowthRatePct" type="number" min="-20" max="20" step="0.1" value="3.0"></label>
               <label>Retirement treatment<select name="retirementTreatment" id="retirementTreatment"><option value="keep">Keep indefinitely</option><option value="sell_at_retirement">Sell at retirement</option><option value="sell_at_age">Sell at a specific age</option><option value="downsize">Downsize and release equity</option><option value="convert_to_rental">Convert to rental</option><option value="equity_access">Home-equity / reverse-mortgage scenario</option><option value="undecided">Undecided</option></select></label>
-              <div id="propertyReleaseFields" class="hidden"><div class="form-row"><label>Scenario age<input name="retirementTreatmentAge" type="number" min="18" max="120"></label><label>Net cash released, today's dollars<input name="retirementCashRelease" type="number" min="0" step="1000"></label></div><label>Property growth assumption %<input name="propertyGrowthRatePct" type="number" min="-20" max="20" step="0.1" value="3.0"></label></div>
+              <div id="propertyReleaseFields" class="hidden"><div class="form-row"><label>Scenario age<input name="retirementTreatmentAge" type="number" min="18" max="120"></label><label>Net cash released, today's dollars<input name="retirementCashRelease" type="number" min="0" step="1000"></label></div></div>
+              <div id="rentalPropertyFields" class="rental-property-fields hidden">
+                <div class="profile-intro"><strong>Rental income and operating assumptions</strong><small>Saving creates or updates a linked rental-income source and a linked operating-expense entry. Mortgage payments remain a separate liability.</small></div>
+                <div class="form-row"><label>Gross monthly rent<input name="rentalMonthlyIncome" type="number" min="0" step="1"></label><label>Annual rent growth %<input name="rentalRentGrowthRatePct" type="number" min="-10" max="20" step="0.1" value="3.0"></label></div>
+                <div class="form-row"><label>Vacancy allowance %<input name="rentalVacancyRatePct" type="number" min="0" max="50" step="0.1" value="5.0"></label><label>Management fee %<input name="rentalManagementRatePct" type="number" min="0" max="50" step="0.1" value="8.0"></label></div>
+                <div class="form-row"><label>Annual property tax<input name="rentalAnnualPropertyTax" type="number" min="0" step="1"></label><label>Annual insurance<input name="rentalAnnualInsurance" type="number" min="0" step="1"></label></div>
+                <div class="form-row"><label>Monthly HOA<input name="rentalMonthlyHoa" type="number" min="0" step="1" value="0"></label><label>Monthly maintenance reserve<input name="rentalMonthlyMaintenance" type="number" min="0" step="1"></label></div>
+                <label>Rental cash account<select name="rentalDepositAccountId" id="rentalDepositAccountSelect"><option value="">Use default cash account</option></select><small>Gross rent is deposited here and operating costs are paid from here before other liquid accounts.</small></label>
+                <div id="savedRentalEconomics" class="rental-economics-inline"></div>
+              </div>
             </div>
             <label>Current balance<input name="currentBalance" type="number" min="0" step="0.01" required></label>
             <div id="portfolioSetupPrompt" class="info-callout hidden">After saving, Nirvana will open Holdings → Manage Holdings so you can add stocks or ETFs and calculate the account forecast.</div>
@@ -670,11 +752,12 @@
   </aside>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
-  <script src="/app.js?v=0.5.0" defer></script>
+  <script src="/app.js?v=0.9.0" defer></script>
   <script src="/planning-ui.js?v=0.5.1" defer></script>
   <script src="/portfolio-ui.js?v=0.5.0" defer></script>
   <script src="/what-if-ui.js?v=0.6.1" defer></script>
   <script src="/holdings-ui.js?v=0.8.0" defer></script>
   <script src="/intelligence-ui.js?v=0.8.1" defer></script>
+  <script src="/real-estate-ui.js?v=0.9.0" defer></script>
 </body>
 </html>

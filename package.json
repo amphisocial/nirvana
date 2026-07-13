@@ -1,9 +1,9 @@
 {
   "name": "nirvana-financial-planner",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
-  "description": "Nirvana personal finance, retirement planning, agentic portfolio intelligence, and scenario analysis platform.",
+  "description": "Nirvana personal finance, retirement, agentic portfolio, real-estate, and scenario planning platform.",
   "engines": {
     "node": ">=20"
   },

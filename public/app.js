@@ -232,16 +232,44 @@ function refreshPropertyProfile(resetValues = false) {
   const form = $('#accountForm');
   const isProperty = form.accountType.value === 'property';
   $('#propertyProfileFields').classList.toggle('hidden', !isProperty);
-  if (!isProperty) return;
+  if (form.propertyZip) form.propertyZip.required = isProperty;
+  if (!isProperty) {
+    $('#rentalPropertyFields')?.classList.add('hidden');
+    return;
+  }
   if (resetValues) {
+    form.propertyAddress.value = '';
+    form.propertyZip.value = '';
+    form.propertyHomeType.value = 'single_family';
+    form.propertyBedrooms.value = '';
+    form.propertyBathrooms.value = '';
+    form.propertySquareFeet.value = '';
     form.isPrimaryResidence.checked = false;
+    form.isRentalProperty.checked = false;
+    form.propertyEstimatePayload.value = '';
     form.retirementTreatment.value = 'keep';
     form.retirementTreatmentAge.value = '';
     form.retirementCashRelease.value = '';
     form.propertyGrowthRatePct.value = '3.0';
+    form.rentalMonthlyIncome.value = '';
+    form.rentalRentGrowthRatePct.value = '3.0';
+    form.rentalVacancyRatePct.value = '5.0';
+    form.rentalManagementRatePct.value = '8.0';
+    form.rentalAnnualPropertyTax.value = '';
+    form.rentalAnnualInsurance.value = '';
+    form.rentalMonthlyHoa.value = '0';
+    form.rentalMonthlyMaintenance.value = '';
+    form.rentalDepositAccountId.value = '';
+    form.useAiPropertyEstimate.checked = true;
+    const status = $('#propertyEstimateStatus');
+    if (status) {
+      status.className = 'property-estimate-status';
+      status.textContent = 'Enter a ZIP code and property value, then estimate. Saving can also run the estimate automatically.';
+    }
   }
   const treatment = form.retirementTreatment.value;
   $('#propertyReleaseFields').classList.toggle('hidden', ['keep', 'convert_to_rental', 'undecided'].includes(treatment));
+  $('#rentalPropertyFields')?.classList.toggle('hidden', !form.isRentalProperty.checked);
 }
 
 function resetAccountEditor() {
@@ -257,10 +285,28 @@ function resetAccountEditor() {
   form.expectedVolatilityPct.value = '12.0';
   refreshInvestmentProfile(false);
   form.isPrimaryResidence.checked = false;
+  form.isRentalProperty.checked = false;
+  form.propertyAddress.value = '';
+  form.propertyZip.value = '';
+  form.propertyHomeType.value = 'single_family';
+  form.propertyBedrooms.value = '';
+  form.propertyBathrooms.value = '';
+  form.propertySquareFeet.value = '';
+  form.propertyEstimatePayload.value = '';
+  form.useAiPropertyEstimate.checked = true;
   form.retirementTreatment.value = 'keep';
   form.retirementTreatmentAge.value = '';
   form.retirementCashRelease.value = '';
   form.propertyGrowthRatePct.value = '3.0';
+  form.rentalMonthlyIncome.value = '';
+  form.rentalRentGrowthRatePct.value = '3.0';
+  form.rentalVacancyRatePct.value = '5.0';
+  form.rentalManagementRatePct.value = '8.0';
+  form.rentalAnnualPropertyTax.value = '';
+  form.rentalAnnualInsurance.value = '';
+  form.rentalMonthlyHoa.value = '0';
+  form.rentalMonthlyMaintenance.value = '';
+  form.rentalDepositAccountId.value = '';
   refreshPropertyProfile(false);
 }
 
@@ -289,10 +335,35 @@ function editAccount(id) {
   form.expectedReturnPct.value = account.expected_return == null ? '6.0' : Number(account.expected_return) * 100;
   form.expectedVolatilityPct.value = account.expected_volatility == null ? '12.0' : Number(account.expected_volatility) * 100;
   form.isPrimaryResidence.checked = Boolean(account.is_primary_residence);
+  form.isRentalProperty.checked = Boolean(account.is_rental_property);
+  form.propertyAddress.value = account.property_address || '';
+  form.propertyZip.value = account.property_zip || '';
+  form.propertyHomeType.value = account.property_home_type || 'single_family';
+  form.propertyBedrooms.value = account.property_bedrooms ?? '';
+  form.propertyBathrooms.value = account.property_bathrooms ?? '';
+  form.propertySquareFeet.value = account.property_square_feet ?? '';
+  form.propertyEstimatePayload.value = account.property_market_summary
+    ? JSON.stringify(account.property_market_summary)
+    : '';
+  form.useAiPropertyEstimate.checked = false;
   form.retirementTreatment.value = account.retirement_treatment || 'keep';
   form.retirementTreatmentAge.value = account.retirement_treatment_age ?? '';
   form.retirementCashRelease.value = account.retirement_cash_release ?? '';
   form.propertyGrowthRatePct.value = account.property_growth_rate == null ? '3.0' : Number(account.property_growth_rate) * 100;
+  form.rentalMonthlyIncome.value = account.rental_monthly_income ?? '';
+  form.rentalRentGrowthRatePct.value = account.rental_rent_growth_rate == null ? '3.0' : Number(account.rental_rent_growth_rate) * 100;
+  form.rentalVacancyRatePct.value = account.rental_vacancy_rate == null ? '5.0' : Number(account.rental_vacancy_rate) * 100;
+  form.rentalManagementRatePct.value = account.rental_management_rate == null ? '8.0' : Number(account.rental_management_rate) * 100;
+  form.rentalAnnualPropertyTax.value = account.rental_annual_property_tax ?? '';
+  form.rentalAnnualInsurance.value = account.rental_annual_insurance ?? '';
+  form.rentalMonthlyHoa.value = account.rental_monthly_hoa ?? '0';
+  form.rentalMonthlyMaintenance.value = account.rental_monthly_maintenance ?? '';
+  form.rentalDepositAccountId.value = account.rental_deposit_account_id ?? '';
+  const estimateStatus = $('#propertyEstimateStatus');
+  if (estimateStatus && account.account_type === 'property') {
+    estimateStatus.className = `property-estimate-status ${account.property_growth_source === 'ai_web_research' ? 'success' : ''}`;
+    estimateStatus.textContent = `${account.property_growth_source === 'ai_web_research' ? 'AI ZIP estimate' : 'Saved property assumption'} · ${(Number(account.property_growth_rate || 0.03) * 100).toFixed(1)}% annual appreciation${account.property_growth_as_of ? ` · ${String(account.property_growth_as_of).slice(0, 10)}` : ''}`;
+  }
   refreshInvestmentProfile(false);
   refreshPropertyProfile(false);
   $('#accountFormTitle').textContent = 'Edit asset';
@@ -395,7 +466,7 @@ function renderAccounts() {
     const profile = row.investment_style
       ? ` · ${escapeHtml((row.projection_method || 'profile').replaceAll('_', ' '))} · ${(Number(profileReturn || 0) * 100).toFixed(1)}% modeled growth${row.holding_count ? ` · ${row.holding_count} holdings` : ''}`
       : row.account_type === 'property'
-        ? ` · ${row.is_primary_residence ? 'primary residence' : 'property'} · ${escapeHtml((row.retirement_treatment || 'keep').replaceAll('_', ' '))}`
+        ? ` · ${row.is_rental_property ? 'rental property' : row.is_primary_residence ? 'primary residence' : 'property'}${row.property_zip ? ` · ZIP ${escapeHtml(row.property_zip)}` : ''} · ${(Number(row.property_growth_rate || 0.03) * 100).toFixed(1)}% appreciation${row.is_rental_property && Number(row.rental_monthly_income) > 0 ? ` · ${money.format(row.rental_monthly_income)}/mo rent` : ''}`
         : '';
     details.innerHTML = `<span><strong>${escapeHtml(row.name)}</strong></span><small>${escapeHtml(row.institution || 'Manual')} · ${escapeHtml(row.kind)}${profile}</small>`;
 
@@ -789,11 +860,36 @@ async function initialize() {
         payload.expectedVolatility = Number(values.expectedVolatilityPct) / 100;
       }
       if (values.accountType === 'property') {
+        let propertyEstimate = null;
+        if (values.propertyEstimatePayload) {
+          try { propertyEstimate = JSON.parse(values.propertyEstimatePayload); }
+          catch { propertyEstimate = null; }
+        }
         payload.isPrimaryResidence = form.isPrimaryResidence.checked;
+        payload.isRentalProperty = form.isRentalProperty.checked;
+        payload.propertyAddress = values.propertyAddress || null;
+        payload.propertyZip = values.propertyZip || null;
+        payload.propertyHomeType = values.propertyHomeType || 'single_family';
+        payload.propertyBedrooms = values.propertyBedrooms || null;
+        payload.propertyBathrooms = values.propertyBathrooms || null;
+        payload.propertySquareFeet = values.propertySquareFeet || null;
+        payload.useAiPropertyEstimate = form.useAiPropertyEstimate.checked;
+        payload.propertyEstimate = propertyEstimate;
         payload.retirementTreatment = values.retirementTreatment;
         payload.retirementTreatmentAge = values.retirementTreatmentAge || null;
         payload.retirementCashRelease = values.retirementCashRelease || null;
         payload.propertyGrowthRate = Number(values.propertyGrowthRatePct || 3) / 100;
+        if (form.isRentalProperty.checked) {
+          payload.rentalMonthlyIncome = values.rentalMonthlyIncome || null;
+          payload.rentalRentGrowthRate = Number(values.rentalRentGrowthRatePct || 3) / 100;
+          payload.rentalVacancyRate = Number(values.rentalVacancyRatePct || 5) / 100;
+          payload.rentalManagementRate = Number(values.rentalManagementRatePct || 8) / 100;
+          payload.rentalAnnualPropertyTax = values.rentalAnnualPropertyTax || 0;
+          payload.rentalAnnualInsurance = values.rentalAnnualInsurance || 0;
+          payload.rentalMonthlyHoa = values.rentalMonthlyHoa || 0;
+          payload.rentalMonthlyMaintenance = values.rentalMonthlyMaintenance || 0;
+          payload.rentalDepositAccountId = values.rentalDepositAccountId || null;
+        }
       }
       const savedAccount = await api(
         editing ? `/api/accounts/${state.editingAccountId}` : '/api/accounts',
@@ -807,6 +903,10 @@ async function initialize() {
       if (savedAccount?.requiresPortfolioSetup || savedAccount?.projection_method === 'holdings_monte_carlo') {
         document.dispatchEvent(new CustomEvent('nirvana:open-portfolio', { detail: { accountId: savedAccount.id } }));
         showAlert('Account saved. Add its stocks or ETFs below, then calculate Monte Carlo growth.');
+      } else if (savedAccount?.is_rental_property && savedAccount?.rentalCashFlow) {
+        showAlert(editing
+          ? 'Rental property, linked rental income, and operating expenses updated.'
+          : 'Rental property, linked rental income, and operating expenses added.');
       } else {
         showAlert(editing ? 'Asset updated.' : 'Asset added.');
       }

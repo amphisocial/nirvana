@@ -152,7 +152,21 @@ async function getHouseholdContext(householdId) {
               forecast_as_of, forecast_source,
               is_primary_residence, retirement_treatment, retirement_treatment_age,
               retirement_cash_release::float8 AS retirement_cash_release,
-              property_growth_rate::float8 AS property_growth_rate, last_verified_at
+              property_growth_rate::float8 AS property_growth_rate,
+              property_address, property_zip, property_bedrooms,
+              property_bathrooms::float8 AS property_bathrooms,
+              property_home_type, property_square_feet,
+              is_rental_property,
+              rental_monthly_income::float8 AS rental_monthly_income,
+              rental_vacancy_rate::float8 AS rental_vacancy_rate,
+              rental_management_rate::float8 AS rental_management_rate,
+              rental_annual_property_tax::float8 AS rental_annual_property_tax,
+              rental_annual_insurance::float8 AS rental_annual_insurance,
+              rental_monthly_hoa::float8 AS rental_monthly_hoa,
+              rental_monthly_maintenance::float8 AS rental_monthly_maintenance,
+              rental_rent_growth_rate::float8 AS rental_rent_growth_rate,
+              property_growth_source, property_growth_as_of,
+              property_market_summary, last_verified_at
        FROM accounts WHERE household_id = $1 ORDER BY current_balance DESC`,
       [householdId]
     ),
