@@ -1,4 +1,5 @@
 import { annualize, expenseAtAge, incomeAtAge } from './retirement-cashflow-engine.js';
+import { advanceLoanBalance, mortgagePaymentBreakdown } from './loan-schedule.js';
 
 const INVESTMENT_TYPES = new Set(['brokerage', 'ira', '401k', 'retirement', 'hsa', '529']);
 const LIQUID_TYPES = ['cash', 'brokerage', 'hsa', 'ira', '401k', 'retirement', '529'];
@@ -73,31 +74,6 @@ function accountReturnForYear(account, yearOffset, phases = []) {
   return rate;
 }
 
-function liabilityPayment(row) {
-  if (row.liability_type === 'mortgage') {
-    return Math.max(0, number(row.principal_interest_payment, row.monthly_payment ?? row.minimum_payment));
-  }
-  return Math.max(0, number(row.monthly_payment, row.minimum_payment));
-}
-
-function amortizeOneYear(balance, annualRate, monthlyPayment) {
-  let remaining = Math.max(0, number(balance));
-  const rate = Math.max(0, number(annualRate)) / 12;
-  const payment = Math.max(0, number(monthlyPayment));
-  if (remaining <= 0 || payment <= 0) return remaining;
-
-  for (let month = 0; month < 12 && remaining > 0; month += 1) {
-    const interest = remaining * rate;
-    const principal = Math.max(0, payment - interest);
-    if (principal <= 0) {
-      remaining += interest - payment;
-    } else {
-      remaining = Math.max(0, remaining - principal);
-    }
-  }
-  return remaining;
-}
-
 function cloneState(data) {
   return {
     accounts: new Map((data.accounts || []).map((row) => [row.id, {
@@ -162,9 +138,74 @@ function contributionValue(item, projectionYear, currentYear) {
   return annual * ((1 + number(item.annual_increase_rate)) ** growthYears);
 }
 
-function expenseShouldStop(expense, paidLiabilityIds) {
-  if (!expense.linked_liability_id || !paidLiabilityIds.has(expense.linked_liability_id)) return false;
-  return DEBT_SERVICE_CATEGORIES.has(expense.category);
+function normalizedWords(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function nameMatchesExpense(expense, liability) {
+  const expenseText = normalizedWords(`${expense.name || ''} ${expense.category || ''}`);
+  const liabilityName = normalizedWords(liability.name);
+  if (!expenseText || !liabilityName) return false;
+  return expenseText.includes(liabilityName) || liabilityName.includes(expenseText);
+}
+
+function inferLiabilityForExpense(expense, state) {
+  if (expense.linked_liability_id) {
+    return state.liabilities.get(expense.linked_liability_id) || null;
+  }
+
+  const liabilities = [...state.liabilities.values()];
+  const direct = liabilities.find((liability) => nameMatchesExpense(expense, liability));
+  if (direct) return direct;
+
+  const text = normalizedWords(`${expense.name || ''} ${expense.category || ''}`);
+
+  if (expense.category === 'mortgage' || expense.category === 'mortgage_insurance' || /mortgage|home loan/.test(text)) {
+    const mortgages = liabilities.filter((row) => row.liability_type === 'mortgage');
+    if (mortgages.length === 1) return mortgages[0];
+  }
+
+  if (expense.category === 'debt_payment') {
+    const keywordGroups = [
+      { pattern: /heloc|home equity/, match: (row) => /heloc|home equity/.test(normalizedWords(`${row.name} ${row.liability_type}`)) },
+      { pattern: /car|auto|vehicle/, match: (row) => row.liability_type === 'auto_loan' || /car|auto|vehicle/.test(normalizedWords(row.name)) },
+      { pattern: /student/, match: (row) => row.liability_type === 'student_loan' || /student/.test(normalizedWords(row.name)) },
+      { pattern: /personal/, match: (row) => row.liability_type === 'personal_loan' || /personal/.test(normalizedWords(row.name)) },
+      { pattern: /credit card/, match: (row) => row.liability_type === 'credit_card' || /credit card/.test(normalizedWords(row.name)) }
+    ];
+
+    for (const group of keywordGroups) {
+      if (!group.pattern.test(text)) continue;
+      const matches = liabilities.filter(group.match);
+      if (matches.length === 1) return matches[0];
+    }
+
+    const nonMortgages = liabilities.filter((row) => row.liability_type !== 'mortgage');
+    if (nonMortgages.length === 1) return nonMortgages[0];
+  }
+
+  return null;
+}
+
+function expenseAmountAfterPayoff(expense, amount, state, paidLiabilityIds) {
+  if (!DEBT_SERVICE_CATEGORIES.has(expense.category)) return amount;
+
+  const liability = inferLiabilityForExpense(expense, state);
+  if (!liability || !paidLiabilityIds.has(liability.id)) return amount;
+
+  if (expense.category === 'mortgage') {
+    const breakdown = mortgagePaymentBreakdown({
+      ...liability,
+      current_balance: liability.balance
+    });
+    const paidOffMonthlyComponents = breakdown.principalInterest + breakdown.pmi;
+    return Math.max(0, amount - paidOffMonthlyComponents * 12);
+  }
+
+  return 0;
 }
 
 function payoffTargetsAtAge(state, payoffActions, age, events, paidLiabilityIds) {
@@ -175,7 +216,7 @@ function payoffTargetsAtAge(state, payoffActions, age, events, paidLiabilityIds)
     if (Math.floor(number(action.age, -1)) !== age) continue;
     const source = state.accounts.get(action.sourceAccountId);
     if (!source) {
-      events.push(`Payoff skipped: source account was unavailable`);
+      events.push('Payoff skipped: source account was unavailable');
       continue;
     }
 
@@ -183,18 +224,24 @@ function payoffTargetsAtAge(state, payoffActions, age, events, paidLiabilityIds)
     for (const id of targetIds) {
       const liability = state.liabilities.get(id);
       if (!liability || liability.balance <= 0) continue;
-      const available = Math.max(0, source.balance);
-      const payment = Math.min(available, liability.balance);
-      source.balance -= payment;
-      liability.balance -= payment;
-      totalPaid += payment;
-      if (liability.balance <= 0.01) {
-        liability.balance = 0;
-        paidLiabilityIds.add(id);
-        events.push(`${liability.name} paid off from ${source.name}`);
+
+      const payoffAmount = Math.max(0, liability.balance);
+      const availableBeforePayoff = Math.max(0, source.balance);
+      const shortfall = Math.max(0, payoffAmount - availableBeforePayoff);
+
+      // Model the requested payoff in full. A negative account balance is a
+      // visible funding gap, not a silent partial payoff.
+      source.balance -= payoffAmount;
+      liability.balance = 0;
+      paidLiabilityIds.add(id);
+
+      totalPaid += payoffAmount;
+      totalShortfall += shortfall;
+
+      if (shortfall > 0) {
+        events.push(`${liability.name} paid off from ${source.name}; funding gap ${round(shortfall)}`);
       } else {
-        totalShortfall += liability.balance;
-        events.push(`${liability.name} partially paid from ${source.name}`);
+        events.push(`${liability.name} paid off from ${source.name}`);
       }
     }
   }
@@ -214,13 +261,19 @@ function householdIncomeForAge(data, age, currentAge, retirementAge, currentYear
   }, { gross: 0, afterTax: 0, items: [] });
 }
 
-function householdExpensesForAge(data, age, currentAge, retirementAge, currentYear, paidLiabilityIds) {
+function householdExpensesForAge(data, state, age, currentAge, retirementAge, currentYear, paidLiabilityIds) {
   return (data.expenses || []).reduce((total, item) => {
-    if (expenseShouldStop(item, paidLiabilityIds)) return total;
-    const amount = expenseAtAge(item, age, currentAge, retirementAge, currentYear);
+    const scheduledAmount = expenseAtAge(item, age, currentAge, retirementAge, currentYear);
+    const amount = expenseAmountAfterPayoff(
+      item,
+      scheduledAmount,
+      state,
+      paidLiabilityIds
+    );
+
     total.total += amount;
     if (item.payment_account_type === '529') total.from529 += amount;
-    total.items.push({ item, amount });
+    if (amount > 0) total.items.push({ item, amount });
     return total;
   }, { total: 0, from529: 0, items: [] });
 }
@@ -271,8 +324,9 @@ function applyExpenses(state, expenseSummary) {
 
 function applyReturns(state, yearOffset, returnPhases) {
   for (const account of state.accounts.values()) {
+    if (account.balance <= 0) continue;
     const rate = accountReturnForYear(account, yearOffset, returnPhases);
-    account.balance = Math.max(0, account.balance * (1 + rate));
+    account.balance *= 1 + rate;
   }
 }
 
@@ -282,11 +336,28 @@ function applyDebtAmortization(state, paidLiabilityIds) {
       paidLiabilityIds.add(liability.id);
       continue;
     }
-    liability.balance = amortizeOneYear(
-      liability.balance,
-      liability.interest_rate,
-      liabilityPayment(liability)
-    );
+
+    let months = 12;
+    const originalTermMonths = Math.max(0, Math.floor(number(liability.original_term_months)));
+    const currentTermMonth = liability.current_term_month == null
+      ? null
+      : Math.max(0, Math.floor(number(liability.current_term_month)));
+
+    if (originalTermMonths > 0 && currentTermMonth != null) {
+      const remainingMonths = Math.max(0, originalTermMonths - currentTermMonth);
+      months = Math.min(12, remainingMonths);
+      if (months <= 0) continue;
+    }
+
+    liability.balance = advanceLoanBalance({
+      ...liability,
+      current_balance: liability.balance
+    }, months);
+
+    if (currentTermMonth != null) {
+      liability.current_term_month = currentTermMonth + months;
+    }
+
     if (liability.balance <= 0.01) {
       liability.balance = 0;
       paidLiabilityIds.add(liability.id);
@@ -324,10 +395,14 @@ function simulate(data, scenario = {}) {
   const retirementAge = Math.max(currentAge + 1, Math.floor(number(plan.retirement_age, 65)));
   const endAge = Math.max(retirementAge + 1, Math.floor(number(plan.plan_end_age, 95)));
   const currentYear = Math.floor(number(scenario.currentYear, new Date().getUTCFullYear()));
+  const trackedAccountId = scenario.trackingAccountId
+    || scenario.payoffActions?.[0]?.sourceAccountId
+    || null;
   const state = cloneState(data);
   const paidLiabilityIds = new Set();
   const timeline = [];
   let cumulativeShortfall = 0;
+  let cumulativePayoffShortfall = 0;
   let cumulativePayoff = 0;
 
   for (let age = currentAge; age <= endAge; age += 1) {
@@ -343,30 +418,21 @@ function simulate(data, scenario = {}) {
       paidLiabilityIds
     );
     cumulativePayoff += payoff.totalPaid;
+    cumulativePayoffShortfall += payoff.totalShortfall;
     cumulativeShortfall += payoff.totalShortfall;
 
-    applyReturns(state, yearOffset, scenario.returnPhases || []);
-
     const income = householdIncomeForAge(data, age, currentAge, retirementAge, currentYear);
-    applyIncome(state, income);
-
-    const contribution = applyContributions(state, data.contributions || [], projectionYear, currentYear);
-    cumulativeShortfall += contribution.shortfall;
-
     const expenses = householdExpensesForAge(
       data,
+      state,
       age,
       currentAge,
       retirementAge,
       currentYear,
       paidLiabilityIds
     );
-    const expensePayment = applyExpenses(state, expenses);
-    cumulativeShortfall += expensePayment.shortfall;
-
-    applyDebtAmortization(state, paidLiabilityIds);
-
     const summary = summarizeState(state);
+
     timeline.push({
       age,
       year: projectionYear,
@@ -374,17 +440,42 @@ function simulate(data, scenario = {}) {
       monthlyExpenses: round(expenses.total / 12),
       monthlyExpensesExcluding529: round((expenses.total - expenses.from529) / 12),
       monthly529Expenses: round(expenses.from529 / 12),
-      monthlyNetCashFlow: round((income.afterTax + contribution.external - expenses.total) / 12),
-      annualExternalContributions: round(contribution.external),
-      annualTransfers: round(contribution.transfers),
+      monthlyNetCashFlow: round((income.afterTax - expenses.total) / 12),
+      annualExternalContributions: 0,
+      annualTransfers: 0,
       savingsInvestments: round(summary.savingsInvestments),
       stockAccounts: round(summary.stockAccounts),
+      fundingAccountBalance: round(
+        trackedAccountId
+          ? state.accounts.get(trackedAccountId)?.balance
+          : summary.stockAccounts
+      ),
       realEstate: round(summary.realEstate),
       otherAssets: round(summary.otherAssets),
       debt: round(summary.debt),
       netWorth: round(summary.netWorth),
       events
     });
+
+    if (age === endAge) break;
+
+    applyReturns(state, yearOffset, scenario.returnPhases || []);
+    applyIncome(state, income);
+
+    const contribution = applyContributions(state, data.contributions || [], projectionYear, currentYear);
+    cumulativeShortfall += contribution.shortfall;
+
+    const expensePayment = applyExpenses(state, expenses);
+    cumulativeShortfall += expensePayment.shortfall;
+
+    applyDebtAmortization(state, paidLiabilityIds);
+
+    const row = timeline.at(-1);
+    row.monthlyNetCashFlow = round(
+      (income.afterTax + contribution.external - expenses.total) / 12
+    );
+    row.annualExternalContributions = round(contribution.external);
+    row.annualTransfers = round(contribution.transfers);
   }
 
   return {
@@ -393,6 +484,7 @@ function simulate(data, scenario = {}) {
     endAge,
     timeline,
     cumulativeShortfall: round(cumulativeShortfall),
+    cumulativePayoffShortfall: round(cumulativePayoffShortfall),
     cumulativePayoff: round(cumulativePayoff)
   };
 }
@@ -411,8 +503,9 @@ function largestExpenseChange(baseline, scenario) {
 }
 
 export function simulateHouseholdWhatIf(data, scenario = {}) {
-  const baseline = simulate(data, {});
-  const alternative = simulate(data, scenario);
+  const trackingAccountId = scenario.payoffActions?.[0]?.sourceAccountId || null;
+  const baseline = simulate(data, { trackingAccountId });
+  const alternative = simulate(data, { ...scenario, trackingAccountId });
   const baselineRetirement = atAge(baseline.timeline, baseline.retirementAge);
   const scenarioRetirement = atAge(alternative.timeline, alternative.retirementAge);
   const baselineEnd = baseline.timeline.at(-1);
@@ -439,7 +532,13 @@ export function simulateHouseholdWhatIf(data, scenario = {}) {
       netWorthAtEndBaseline: round(baselineEnd?.netWorth),
       netWorthAtEndScenario: round(scenarioEnd?.netWorth),
       netWorthAtEndChange: round(number(scenarioEnd?.netWorth) - number(baselineEnd?.netWorth)),
-      scenarioFundingShortfall: alternative.cumulativeShortfall
+      scenarioFundingShortfall: alternative.cumulativePayoffShortfall,
+      scenarioOtherFundingShortfall: round(
+        alternative.cumulativeShortfall - alternative.cumulativePayoffShortfall
+      ),
+      fundingAccountMinimumBalance: round(Math.min(
+        ...alternative.timeline.map((row) => number(row.fundingAccountBalance))
+      ))
     }
   };
 }

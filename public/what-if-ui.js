@@ -182,7 +182,7 @@
       ? `Starts around age ${metrics.expenseReductionStartsAtAge}`
       : 'No recurring debt-payment reduction';
     $('#whatIfShortfall').textContent = metrics.scenarioFundingShortfall > 0
-      ? `Funding shortfall: ${currency.format(metrics.scenarioFundingShortfall)}`
+      ? `Funding gap: ${currency.format(metrics.scenarioFundingShortfall)}. The selected account is shown below zero because the scenario assumes the requested debts are fully paid.`
       : 'No modeled funding shortfall';
 
     const colors = chartColors();
@@ -253,7 +253,8 @@
         datasets: [
           { label: 'Baseline debt', data: baseline.timeline.map((row) => row.debt), borderColor: colors.slate, backgroundColor: colors.slate, borderWidth: 2, borderDash: [5, 4], pointRadius: 0, tension: .2 },
           { label: 'Scenario debt', data: alternative.timeline.map((row) => row.debt), borderColor: colors.blue, backgroundColor: colors.blue, borderWidth: 3, pointRadius: 0, tension: .2 },
-          { label: 'Scenario stock accounts', data: alternative.timeline.map((row) => row.stockAccounts), borderColor: colors.blueDark, backgroundColor: colors.blueDark, borderWidth: 2, pointRadius: 0, tension: .2 }
+          { label: `Baseline ${scenario.payoffActions?.[0]?.sourceAccountName || 'stock account'}`, data: baseline.timeline.map((row) => row.fundingAccountBalance ?? row.stockAccounts), borderColor: colors.blueLight, backgroundColor: colors.blueLight, borderWidth: 2, borderDash: [3, 3], pointRadius: 0, tension: .2 },
+          { label: `Scenario ${scenario.payoffActions?.[0]?.sourceAccountName || 'stock account'}`, data: alternative.timeline.map((row) => row.fundingAccountBalance ?? row.stockAccounts), borderColor: colors.blueDark, backgroundColor: colors.blueDark, borderWidth: 2.5, pointRadius: 0, tension: .2 }
         ]
       },
       options: {

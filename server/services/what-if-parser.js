@@ -53,6 +53,26 @@ function resolveSourceAccount(prompt, accounts) {
   return null;
 }
 
+function defaultPayoffSource(accounts) {
+  const preferredTypes = ['brokerage', 'cash', 'hsa', 'ira', '401k', 'retirement', '529'];
+  const candidates = [...accounts].sort(
+    (a, b) => number(b.current_balance, 0) - number(a.current_balance, 0)
+  );
+
+  for (const type of preferredTypes) {
+    const match = candidates.find((row) => row.account_type === type);
+    if (match) return match;
+  }
+
+  return candidates[0] || null;
+}
+
+function hasPayoffIntent(prompt) {
+  return /pay\s*off|payoff|clear|eliminate|retire\s+(?:the\s+)?(?:loan|debt)|debt[- ]free/i.test(
+    String(prompt || '')
+  );
+}
+
 function liabilityMatchesPrompt(prompt, liability) {
   const text = words(prompt);
   if (fuzzyIncludes(text, liability.name)) return true;
@@ -152,7 +172,8 @@ function normalizeAiScenario(raw, context) {
 
   for (const action of raw.payoffActions || []) {
     const source = accounts.find((row) => row.id === action.sourceAccountId)
-      || accounts.find((row) => fuzzyIncludes(action.sourceAccountName, row.name));
+      || accounts.find((row) => fuzzyIncludes(action.sourceAccountName, row.name))
+      || defaultPayoffSource(accounts);
     const targets = liabilities.filter((row) =>
       (action.liabilityIds || []).includes(row.id)
       || (action.liabilityNames || []).some((name) => fuzzyIncludes(name, row.name))
@@ -236,8 +257,13 @@ function deterministicScenario(prompt, context, mode) {
   const liabilities = context.liabilities || [];
   const currentAge = number(context.currentAge, 45);
   const age = findAge(prompt, currentAge);
-  const source = resolveSourceAccount(prompt, accounts);
   const targets = liabilities.filter((row) => liabilityMatchesPrompt(prompt, row));
+  const explicitSource = resolveSourceAccount(prompt, accounts);
+  const usedDefaultSource = !explicitSource
+    && hasPayoffIntent(prompt)
+    && age != null
+    && targets.length > 0;
+  const source = explicitSource || (usedDefaultSource ? defaultPayoffSource(accounts) : null);
   const payoffActions = source && age != null && targets.length
     ? [{
         sourceAccountId: source.id,
@@ -249,6 +275,9 @@ function deterministicScenario(prompt, context, mode) {
     : [];
   const returnPhases = parseReturnPhases(prompt);
   const symbolShocks = parseSymbolShocks(prompt, context.holdings || []);
+  const notes = usedDefaultSource && source
+    ? [`No funding account was named, so ${source.name} was used for the temporary payoff analysis.`]
+    : [];
 
   return {
     title: payoffActions.length ? `Pay debt at age ${age}`
@@ -259,7 +288,7 @@ function deterministicScenario(prompt, context, mode) {
     returnPhases,
     symbolShocks,
     horizonYears: 10,
-    notes: [],
+    notes,
     mode
   };
 }
