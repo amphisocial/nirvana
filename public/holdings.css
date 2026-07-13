@@ -1,0 +1,404 @@
+.holdings-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-bottom: 1rem;
+  padding: 1.35rem;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: linear-gradient(135deg, var(--blue-pale), #fff 68%);
+}
+
+.holdings-hero h2,
+.holdings-ai-card h2 {
+  margin: .35rem 0 .55rem;
+  color: var(--blue-dark);
+  font-size: clamp(1.35rem, 2vw, 2rem);
+}
+
+.holdings-hero p,
+.holdings-ai-card p {
+  max-width: 780px;
+  margin: 0;
+  color: var(--ink-soft);
+  line-height: 1.55;
+}
+
+.holdings-hero-actions,
+.holdings-ai-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .65rem;
+}
+
+.holdings-control-panel {
+  margin-bottom: 1rem;
+}
+
+.holdings-control-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, .75fr) minmax(360px, 1.25fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.holdings-type-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .6rem;
+}
+
+.holdings-type-filters label {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  min-height: 44px;
+  padding: .65rem .75rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+  color: var(--ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.holdings-type-filters input {
+  width: auto;
+  margin: 0;
+  accent-color: var(--blue);
+}
+
+.holdings-growth-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .6rem;
+}
+
+.holdings-growth-input {
+  display: grid;
+  gap: .45rem;
+  padding: .65rem .75rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.holdings-growth-input > span {
+  display: grid;
+  gap: .15rem;
+  font-weight: 800;
+}
+
+.holdings-growth-input small {
+  color: var(--ink-soft);
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.holdings-growth-input > div {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+}
+
+.holdings-growth-input input {
+  width: 100%;
+  min-width: 0;
+}
+
+.holdings-growth-input b {
+  color: var(--blue-dark);
+}
+
+.holdings-metrics {
+  margin-bottom: 1rem;
+}
+
+.holdings-total-panel,
+.holdings-insight-grid,
+.holdings-detail-grid,
+.holdings-analysis-grid,
+.holdings-table-panel,
+.holdings-scenario-panel {
+  margin-bottom: 1rem;
+}
+
+.holdings-risk-legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .55rem;
+  margin-top: .6rem;
+}
+
+.holdings-risk-legend > div {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  align-items: center;
+  gap: .45rem;
+  padding: .45rem .55rem;
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.holdings-risk-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.holdings-risk-legend span {
+  color: var(--ink-soft);
+  font-size: .8rem;
+}
+
+.holdings-coverage-cards {
+  display: grid;
+  gap: .7rem;
+}
+
+.holdings-coverage-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: .45rem .7rem;
+  padding: .75rem;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface-soft);
+}
+
+.holdings-coverage-card > div {
+  display: grid;
+  gap: .15rem;
+}
+
+.holdings-coverage-card span,
+.holdings-coverage-card small {
+  color: var(--ink-soft);
+  font-size: .76rem;
+  text-transform: capitalize;
+}
+
+.holdings-coverage-card progress {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 9px;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.holdings-coverage-card progress::-webkit-progress-bar {
+  background: var(--line);
+}
+
+.holdings-coverage-card progress::-webkit-progress-value {
+  background: var(--blue);
+}
+
+.holdings-coverage-card progress::-moz-progress-bar {
+  background: var(--blue);
+}
+
+.holdings-ai-card {
+  display: grid;
+  grid-template-columns: minmax(260px, .8fr) minmax(360px, 1.2fr);
+  gap: 1.2rem;
+  margin-bottom: 1rem;
+  padding: 1.25rem;
+  border-radius: 20px;
+  background: linear-gradient(135deg, var(--blue-dark), #175b96);
+  color: #fff;
+  box-shadow: 0 18px 45px rgba(11, 58, 103, .16);
+}
+
+.holdings-ai-card h2,
+.holdings-ai-card .panel-kicker {
+  color: #fff;
+}
+
+.holdings-ai-card p {
+  color: rgba(255,255,255,.82);
+}
+
+.holdings-ai-form {
+  display: grid;
+  gap: .75rem;
+}
+
+.holdings-ai-form textarea {
+  min-height: 120px;
+  resize: vertical;
+  border-color: rgba(255,255,255,.34);
+  background: rgba(255,255,255,.98);
+}
+
+.holdings-prompt-chips {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.holdings-prompt-chips button {
+  padding: .45rem .65rem;
+  border: 1px solid rgba(255,255,255,.32);
+  border-radius: 999px;
+  background: rgba(255,255,255,.12);
+  color: #fff;
+  font-size: .76rem;
+  cursor: pointer;
+}
+
+.holdings-prompt-chips button:hover {
+  background: rgba(255,255,255,.2);
+}
+
+.holdings-event-list {
+  display: grid;
+  gap: .5rem;
+  margin-top: .8rem;
+}
+
+.holdings-event-list > div {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: .75rem;
+  padding: .6rem .7rem;
+  border-radius: 10px;
+  background: var(--surface-soft);
+  color: var(--ink-soft);
+}
+
+.holdings-event-list strong {
+  color: var(--blue-dark);
+}
+
+.holdings-insight-list,
+.holdings-watch-list,
+.holdings-agent-breakdown {
+  display: grid;
+  gap: .55rem;
+}
+
+.holdings-insight-item {
+  position: relative;
+  padding: .65rem .75rem .65rem 2rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+  color: var(--ink);
+  line-height: 1.45;
+}
+
+.holdings-insight-item::before {
+  content: '✦';
+  position: absolute;
+  left: .7rem;
+  top: .62rem;
+  color: var(--blue);
+}
+
+.holdings-watch-list {
+  margin-top: .8rem;
+}
+
+.holdings-watch-list > div {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: .55rem;
+  padding: .55rem .65rem;
+  border-radius: 10px;
+  background: #fff8e6;
+  color: #7c5c12;
+}
+
+.holdings-agent-breakdown > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .7rem .75rem;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-soft);
+}
+
+.holdings-table-wrap {
+  max-height: 620px;
+}
+
+.holdings-table-wrap table {
+  min-width: 1080px;
+}
+
+.holdings-table-wrap td small {
+  display: block;
+  margin-top: .2rem;
+  color: var(--ink-soft);
+  font-size: .7rem;
+  line-height: 1.35;
+}
+
+.holding-price-warning {
+  color: #a95a00 !important;
+  font-weight: 700;
+}
+
+.holdings-risk-pill {
+  display: inline-flex;
+  padding: .28rem .48rem;
+  border-radius: 999px;
+  font-size: .7rem;
+  font-weight: 800;
+}
+
+.risk-high {
+  background: #fbe6e6;
+  color: #a12a2a;
+}
+
+.risk-low {
+  background: #e5f2ff;
+  color: #175b96;
+}
+
+.risk-stable {
+  background: #e8f5ee;
+  color: #276749;
+}
+
+.risk-unclassified {
+  background: #edf2f7;
+  color: #52606d;
+}
+
+.whatif-link-tab {
+  border-style: dashed !important;
+}
+
+@media (max-width: 980px) {
+  .holdings-control-grid,
+  .holdings-ai-card {
+    grid-template-columns: 1fr;
+  }
+
+  .holdings-prompt-chips {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 720px) {
+  .holdings-hero {
+    display: grid;
+  }
+
+  .holdings-type-filters,
+  .holdings-growth-grid,
+  .holdings-risk-legend {
+    grid-template-columns: 1fr;
+  }
+
+  .holdings-event-list > div {
+    grid-template-columns: 1fr;
+  }
+}

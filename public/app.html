@@ -7,6 +7,7 @@
   <title>Nirvana Dashboard</title>
   <link rel="stylesheet" href="/styles.css?v=0.5.1">
   <link rel="stylesheet" href="/what-if.css?v=0.6.0">
+  <link rel="stylesheet" href="/holdings.css?v=0.7.0">
 </head>
 <body class="app-body">
   <aside class="sidebar" id="appSidebar">
@@ -19,6 +20,7 @@
       <button class="nav-item" data-view="retirement" title="Retirement"><span class="nav-icon">◎</span><span class="nav-label">Retirement</span></button>
       <button class="nav-item" data-view="cashflow" title="Income &amp; Expenses"><span class="nav-icon">↕</span><span class="nav-label">Income &amp; Expenses</span></button>
       <button class="nav-item" data-view="scenario" title="What-if Lab"><span class="nav-icon">◇</span><span class="nav-label">What-if Lab</span></button>
+      <button class="nav-item" data-view="holdings" title="Holdings"><span class="nav-icon">◫</span><span class="nav-label">Holdings</span></button>
       <button class="nav-item" data-view="research" title="Research AI"><span class="nav-icon">✦</span><span class="nav-label">Research AI</span></button>
       <button class="nav-item" data-view="accounts" title="Accounts"><span class="nav-icon">▣</span><span class="nav-label">Accounts</span></button>
     </nav>
@@ -189,14 +191,14 @@
       <div>
         <span class="panel-kicker">WHAT-IF LAB</span>
         <h2>Test major financial decisions before making them</h2>
-        <p>Ask Nirvana to pay off debt from an investment account, change future market returns, or stress a stock portfolio. Every run is calculated in memory against your current plan and is discarded when you leave or reset the page.</p>
+        <p>Ask Nirvana to pay off debt from an investment account, change future market returns, or compare major household decisions. Every run is calculated in memory against your current plan and is discarded when you leave or reset the page.</p>
       </div>
       <span class="whatif-session-badge">Session-only analysis</span>
     </div>
 
     <div class="whatif-tabs" role="tablist" aria-label="What-if modes">
       <button class="whatif-tab active" type="button" data-whatif-tab="household" role="tab" aria-selected="true">Household plan</button>
-      <button class="whatif-tab" type="button" data-whatif-tab="portfolio" role="tab" aria-selected="false">Stock portfolio</button>
+      <button class="whatif-tab whatif-link-tab" type="button" data-view-link="holdings">Open Holdings Lab</button>
     </div>
 
     <div class="whatif-tab-panel active" data-whatif-panel="household">
@@ -328,6 +330,134 @@
   </div>
 </section>
 
+    <section id="holdings" class="view">
+      <div class="holdings-hero">
+        <div>
+          <span class="panel-kicker">AGENTIC HOLDINGS INTELLIGENCE</span>
+          <h2>Understand every investment account as one portfolio</h2>
+          <p>Nirvana runs a market-data agent for each saved symbol, combines brokerage, IRA, and 401(k) accounts, and uses each account's growth assumption for any value not yet broken into individual holdings.</p>
+        </div>
+        <div class="holdings-hero-actions">
+          <button id="refreshMissingHoldingPrices" class="button button-secondary" type="button" title="Refresh holdings without a current market price">↻ Refresh missing prices</button>
+          <button id="openHoldingsAssistant" class="button button-primary" type="button">✦ Ask Holdings AI</button>
+        </div>
+      </div>
+
+      <article class="panel holdings-control-panel">
+        <div class="panel-head">
+          <div><span class="panel-kicker">PORTFOLIO SCOPE</span><h2>Choose accounts and fallback growth</h2></div>
+          <span id="holdingsAgentStatus" class="status-pill neutral">Loading symbol agents…</span>
+        </div>
+        <div class="holdings-control-grid">
+          <div class="holdings-type-filters" role="group" aria-label="Investment account types">
+            <label><input type="checkbox" data-holdings-account-type value="brokerage" checked> Brokerage</label>
+            <label><input type="checkbox" data-holdings-account-type value="ira" checked> IRA / Roth IRA</label>
+            <label><input type="checkbox" data-holdings-account-type value="401k" checked> 401(k) / 403(b)</label>
+            <label><input type="checkbox" data-holdings-account-type value="retirement"> Other retirement</label>
+          </div>
+          <div id="holdingsGrowthOverrides" class="holdings-growth-grid"></div>
+        </div>
+        <p class="chart-note">Known symbols use market-agent planning returns. Any account value not represented by priced holdings uses that account's saved or user-entered annual growth rate.</p>
+      </article>
+
+      <div class="metric-grid metric-grid-five holdings-metrics">
+        <article class="metric-card metric-featured"><span>Selected portfolio</span><strong id="holdingsSelectedTotal">—</strong><small>Combined selected accounts</small></article>
+        <article class="metric-card"><span>Priced holdings</span><strong id="holdingsKnownValue">—</strong><small id="holdingsCoverageCopy">— coverage</small></article>
+        <article class="metric-card"><span>Unallocated account value</span><strong id="holdingsUnallocatedValue">—</strong><small>Uses account-level growth</small></article>
+        <article class="metric-card"><span>Three-year baseline</span><strong id="holdingsThreeYearBaseline">—</strong><small>Agent-assisted planning path</small></article>
+        <article class="metric-card"><span>Scenario impact</span><strong id="holdingsScenarioImpact">—</strong><small>Temporary; never saved</small></article>
+      </div>
+
+      <article class="panel chart-panel holdings-total-panel">
+        <div class="panel-head">
+          <div><span class="panel-kicker">36-MONTH OUTLOOK</span><h2>Combined investment-account value</h2></div>
+          <span class="status-pill neutral">Market agents + account fallback</span>
+        </div>
+        <div class="chart-wrap chart-extra-tall"><canvas id="holdingsTotalForecastChart"></canvas></div>
+        <p id="holdingsForecastNote" class="chart-note">The graph is a planning scenario, not a market prediction.</p>
+      </article>
+
+      <div class="dashboard-grid equal holdings-insight-grid">
+        <article class="panel chart-panel">
+          <div class="panel-head"><div><span class="panel-kicker">RISK MIX</span><h2>High, low, and stable holdings</h2></div></div>
+          <div class="chart-wrap chart-tall"><canvas id="holdingsRiskChart"></canvas></div>
+          <div id="holdingsRiskLegend" class="holdings-risk-legend"></div>
+        </article>
+        <article class="panel chart-panel">
+          <div class="panel-head"><div><span class="panel-kicker">ACCOUNT MIX</span><h2>Current and three-year value by account</h2></div></div>
+          <div class="chart-wrap chart-tall"><canvas id="holdingsAccountChart"></canvas></div>
+        </article>
+      </div>
+
+      <div class="dashboard-grid two-one holdings-detail-grid">
+        <article class="panel chart-panel">
+          <div class="panel-head"><div><span class="panel-kicker">CONCENTRATION</span><h2>Largest modeled positions</h2></div></div>
+          <div class="chart-wrap chart-tall"><canvas id="holdingsConcentrationChart"></canvas></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div><span class="panel-kicker">DATA COVERAGE</span><h2>What drives the forecast</h2></div></div>
+          <div id="holdingsCoverageCards" class="holdings-coverage-cards"></div>
+        </article>
+      </div>
+
+      <article class="holdings-ai-card">
+        <div class="holdings-ai-copy">
+          <span class="panel-kicker">TEMPORARY HOLDINGS WHAT-IF</span>
+          <h2>Ask the agents to change the graph</h2>
+          <p>Model a future buy, sell, market shock, or return assumption. Trades are applied only to this page and are never added to holdings or saved to the database.</p>
+        </div>
+        <form id="holdingsWhatIfForm" class="holdings-ai-form">
+          <textarea id="holdingsWhatIfPrompt" maxlength="5000" placeholder="Example: Buy $40,000 of NVDA in my brokerage on 2027-01-15, funded by other positions, and assume NVDA grows 12% annually after that."></textarea>
+          <div class="holdings-ai-actions">
+            <button id="runHoldingsWhatIf" class="button button-primary" type="submit">Run agent workflow</button>
+            <button id="resetHoldingsWhatIf" class="button button-secondary" type="button">Reset scenario</button>
+          </div>
+        </form>
+        <div class="holdings-prompt-chips">
+          <button type="button" data-holdings-prompt="Sell $50,000 of NVDA from my brokerage next year and leave the proceeds in the account's unallocated balance.">Sell NVDA next year</button>
+          <button type="button" data-holdings-prompt="Buy $25,000 of QQQ in my IRA on 2027-01-15 using other assets in that account.">Buy QQQ in IRA</button>
+          <button type="button" data-holdings-prompt="Assume all selected accounts fall 20% in year 1, recover 12% in year 2, and grow 7% in year 3.">Crash and recovery</button>
+          <button type="button" data-holdings-prompt="Assume NVDA grows 20% for the next two years and 8% in year 3.">NVDA growth path</button>
+        </div>
+      </article>
+
+      <div id="holdingsScenarioPanel" class="panel holdings-scenario-panel hidden">
+        <div class="panel-head">
+          <div><span class="panel-kicker">SCENARIO INTERPRETATION</span><h2 id="holdingsScenarioTitle">Temporary scenario</h2></div>
+          <span class="status-pill neutral">Nothing saved</span>
+        </div>
+        <p id="holdingsScenarioSummary" class="muted"></p>
+        <div id="holdingsScenarioAssumptions" class="whatif-assumptions"></div>
+        <div id="holdingsScenarioEvents" class="holdings-event-list"></div>
+      </div>
+
+      <div class="dashboard-grid equal holdings-analysis-grid">
+        <article class="panel">
+          <div class="panel-head"><div><span class="panel-kicker">AI PORTFOLIO INSIGHTS</span><h2 id="holdingsInsightHeadline">Analyzing selected holdings…</h2></div></div>
+          <div id="holdingsInsightList" class="holdings-insight-list"></div>
+          <div id="holdingsWatchList" class="holdings-watch-list"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div><span class="panel-kicker">SYMBOL AGENTS</span><h2>Per-symbol analysis status</h2></div></div>
+          <div id="holdingsAgentBreakdown" class="holdings-agent-breakdown"></div>
+        </article>
+      </div>
+
+      <article class="panel holdings-table-panel">
+        <div class="panel-head">
+          <div><span class="panel-kicker">ALL SAVED HOLDINGS</span><h2>Prices, values, modeled returns, and risk</h2></div>
+          <button class="text-button" data-view-link="accounts" type="button">Manage holdings in Accounts</button>
+        </div>
+        <div class="table-wrap holdings-table-wrap">
+          <table>
+            <thead><tr><th>Symbol</th><th>Account</th><th>Quantity</th><th>Price</th><th>Current value</th><th>Modeled growth</th><th>Risk</th><th>Agent data</th></tr></thead>
+            <tbody id="holdingsLabRows"></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+
     <section id="research" class="view">
       <div class="research-layout">
         <article class="panel chat-panel">
@@ -457,5 +587,6 @@
   <script src="/planning-ui.js?v=0.5.1" defer></script>
   <script src="/portfolio-ui.js?v=0.5.0" defer></script>
   <script src="/what-if-ui.js?v=0.6.1" defer></script>
+  <script src="/holdings-ui.js?v=0.7.0" defer></script>
 </body>
 </html>

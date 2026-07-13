@@ -60,6 +60,8 @@ export function selectSkillNames(message) {
     names.push('stock-market-analyst');
     names.push('quant-equity-research');
   }
-  if (/(what[- ]?if|scenario|target price|allocation|concentration|buy|sell)/i.test(message)) names.push('portfolio-scenario-analyst');
+  if (/(what[- ]?if|scenario|target price|allocation|concentration|holding|portfolio risk|risk mix|brokerage|401\s*\(?k\)?|ira|buy|sell)/i.test(message)) {
+    names.push('portfolio-scenario-analyst');
+  }
   return [...new Set(names)];
 }

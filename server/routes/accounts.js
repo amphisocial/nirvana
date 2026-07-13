@@ -209,12 +209,22 @@ async function refreshAccountBalance(client, accountId) {
   const result = await client.query(`
     SELECT COALESCE(SUM(quantity * COALESCE(current_price, 0)), 0)::float8 AS value
     FROM holdings WHERE account_id = $1`, [accountId]);
-  const value = Number(result.rows[0]?.value || 0);
-  await client.query(`
+  const holdingsValue = Number(result.rows[0]?.value || 0);
+
+  // A user may enter only part of an account's holdings. Preserve a larger
+  // reported account total so the difference can be modeled as an unallocated
+  // balance rather than silently replacing the account with incomplete data.
+  const updated = await client.query(`
     UPDATE accounts
-    SET current_balance = $1, last_verified_at = now(), updated_at = now()
-    WHERE id = $2`, [value, accountId]);
-  return value;
+    SET current_balance = CASE
+          WHEN current_balance IS NULL OR current_balance <= 0 THEN $1
+          ELSE GREATEST(current_balance, $1)
+        END,
+        last_verified_at = now(),
+        updated_at = now()
+    WHERE id = $2
+    RETURNING current_balance::float8 AS current_balance`, [holdingsValue, accountId]);
+  return Number(updated.rows[0]?.current_balance || holdingsValue);
 }
 
 async function currentAgeForHousehold(householdId) {
