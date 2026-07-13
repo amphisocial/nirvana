@@ -18,6 +18,8 @@
     activeAccountsTab: 'accounts',
     editingGoalId: null
   };
+  let alertsCloseTimer = null;
+  let alertsReturnFocus = null;
 
   async function api(url, options = {}) {
     const response = await fetch(url, {
@@ -121,8 +123,14 @@
       const active = button.dataset.intelligenceTab === selected;
       button.classList.toggle('active', active);
       button.setAttribute('aria-selected', String(active));
+      button.tabIndex = active ? 0 : -1;
     });
-    $$('[data-intelligence-panel]').forEach((panel) => panel.classList.toggle('active', panel.dataset.intelligencePanel === selected));
+    $$('[data-intelligence-panel]').forEach((panel) => {
+      const active = panel.dataset.intelligencePanel === selected;
+      panel.classList.toggle('active', active);
+      panel.hidden = !active;
+      panel.setAttribute('aria-hidden', String(!active));
+    });
     if (selected === 'week') loadOverview();
     if (selected === 'desk') loadDesk();
     if (selected === 'calendar') loadCalendar();
@@ -137,9 +145,16 @@
       const active = button.dataset.accountsTab === selected;
       button.classList.toggle('active', active);
       button.setAttribute('aria-selected', String(active));
+      button.tabIndex = active ? 0 : -1;
     });
-    $$('[data-accounts-panel]').forEach((panel) => panel.classList.toggle('active', panel.dataset.accountsPanel === selected));
+    $$('[data-accounts-panel]').forEach((panel) => {
+      const active = panel.dataset.accountsPanel === selected;
+      panel.classList.toggle('active', active);
+      panel.hidden = !active;
+      panel.setAttribute('aria-hidden', String(!active));
+    });
     if (selected === 'sharing') loadSharing();
+    window.setTimeout(() => Object.values(charts).forEach((chart) => chart?.resize()), 60);
   }
 
   function renderMovements(id, rows, debt = false) {
@@ -417,9 +432,22 @@
       }
       const dismiss = document.createElement('button');
       dismiss.type = 'button'; dismiss.className = 'button button-secondary'; dismiss.textContent = 'Dismiss';
+      dismiss.setAttribute('aria-label', `Dismiss ${alert.title}`);
       dismiss.addEventListener('click', async () => {
-        try { await api(`/api/intelligence/alerts/${alert.id}/dismiss`, { method: 'POST', body: '{}' }); await loadAlerts(true); }
-        catch (error) { notify(error.message); }
+        dismiss.disabled = true;
+        dismiss.textContent = 'Dismissing…';
+        try {
+          await api(`/api/intelligence/alerts/${alert.id}/dismiss`, { method: 'POST', body: '{}' });
+          item.remove();
+          state.alerts = state.alerts.filter((row) => row.id !== alert.id);
+          count.textContent = String(state.alerts.length);
+          count.classList.toggle('hidden', state.alerts.length === 0);
+          if (!list.children.length) list.innerHTML = '<div class="empty-state-card">No open alert. Weekly agents will add meaningful drift, goal, and spending items here.</div>';
+        } catch (error) {
+          dismiss.disabled = false;
+          dismiss.textContent = 'Dismiss';
+          notify(error.message);
+        }
       });
       actions.append(dismiss);
       item.append(top, summary, recommendation, actions);
@@ -437,16 +465,37 @@
   }
 
   function openAlerts() {
+    const dialog = $('#alertsDrawer');
+    const backdrop = $('#alertsBackdrop');
+    if (!dialog || !backdrop) return;
+    window.clearTimeout(alertsCloseTimer);
+    alertsReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : $('#alertBell');
+    dialog.hidden = false;
+    backdrop.hidden = false;
+    dialog.setAttribute('aria-hidden', 'false');
+    $('#alertBell')?.setAttribute('aria-expanded', 'true');
+    document.body.classList.add('alerts-open');
+    window.requestAnimationFrame(() => {
+      dialog.classList.add('open');
+      $('#alertsClose')?.focus();
+    });
     loadAlerts(true);
-    $('#alertsDrawer').classList.add('open');
-    $('#alertsDrawer').setAttribute('aria-hidden', 'false');
-    $('#alertsBackdrop').classList.remove('hidden');
   }
 
   function closeAlerts() {
-    $('#alertsDrawer').classList.remove('open');
-    $('#alertsDrawer').setAttribute('aria-hidden', 'true');
-    $('#alertsBackdrop').classList.add('hidden');
+    const dialog = $('#alertsDrawer');
+    const backdrop = $('#alertsBackdrop');
+    if (!dialog || dialog.hidden) return;
+    dialog.classList.remove('open');
+    dialog.setAttribute('aria-hidden', 'true');
+    $('#alertBell')?.setAttribute('aria-expanded', 'false');
+    document.body.classList.remove('alerts-open');
+    window.clearTimeout(alertsCloseTimer);
+    alertsCloseTimer = window.setTimeout(() => {
+      dialog.hidden = true;
+      backdrop.hidden = true;
+    }, 190);
+    alertsReturnFocus?.focus?.();
   }
 
   async function resetDriftTargets() {
@@ -749,6 +798,9 @@
     $('#alertBell')?.addEventListener('click', openAlerts);
     $('#alertsClose')?.addEventListener('click', closeAlerts);
     $('#alertsBackdrop')?.addEventListener('click', closeAlerts);
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !$('#alertsDrawer')?.hidden) closeAlerts();
+    });
     $('#resetDriftTargetsDrawer')?.addEventListener('click', resetDriftTargets);
     $('#resetPortfolioTargets')?.addEventListener('click', resetDriftTargets);
     $('#runWeeklyAgents')?.addEventListener('click', runWeeklyAgents);
@@ -772,6 +824,8 @@
 
     const month = new Date().toISOString().slice(0, 7);
     if ($('#spendingMonth')) $('#spendingMonth').value = month;
+    showIntelligenceTab(state.activeIntelligenceTab);
+    showAccountsTab(state.activeAccountsTab);
     loadAlerts();
     window.setTimeout(() => loadOverview(), 300);
   });

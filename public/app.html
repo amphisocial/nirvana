@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/styles.css?v=0.5.1">
   <link rel="stylesheet" href="/what-if.css?v=0.6.0">
   <link rel="stylesheet" href="/holdings.css?v=0.7.1">
+  <link rel="stylesheet" href="/intelligence.css?v=0.8.1">
 </head>
 <body class="app-body">
   <aside class="sidebar" id="appSidebar">
@@ -35,7 +36,7 @@
   <main class="app-main">
     <header class="app-header">
       <div><p class="eyebrow">FINANCIAL COMMAND CENTER</p><h1 id="pageTitle">Overview</h1></div>
-      <div class="header-actions"><button id="assistantToggle" class="assistant-toggle" type="button">✦ Ask Nirvana</button><button id="alertBell" class="alert-bell" type="button" aria-label="Open financial alerts" title="Financial alerts"><span aria-hidden="true">🔔</span><b id="alertCount" class="alert-count hidden">0</b></button><span id="userLabel" class="user-chip">Loading…</span><button id="refreshButton" class="icon-button" aria-label="Refresh dashboard">↻</button></div>
+      <div class="header-actions"><button id="assistantToggle" class="assistant-toggle" type="button">✦ Ask Nirvana</button><button id="alertBell" class="alert-bell" type="button" aria-label="Open financial alerts" aria-haspopup="dialog" aria-controls="alertsDrawer" aria-expanded="false" title="Financial alerts"><svg class="alert-bell-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path></svg><b id="alertCount" class="alert-count hidden">0</b></button><span id="userLabel" class="user-chip">Loading…</span><button id="refreshButton" class="icon-button" aria-label="Refresh dashboard">↻</button></div>
     </header>
 
     <div id="globalAlert" class="alert hidden" role="alert"></div>
@@ -564,8 +565,8 @@
     </section>
 
     <section id="accounts" class="view">
-      <div class="workspace-tabs account-workspace-tabs" role="tablist" aria-label="Accounts workspace"><button class="workspace-tab active" type="button" data-accounts-tab="accounts" aria-selected="true">Accounts &amp; Debts</button><button class="workspace-tab" type="button" data-accounts-tab="sharing" aria-selected="false">Household Sharing</button></div>
-      <div class="workspace-panel active" data-accounts-panel="accounts">
+      <div class="workspace-tabs account-workspace-tabs" role="tablist" aria-label="Accounts workspace"><button id="accountsTabButton" class="workspace-tab active" type="button" role="tab" data-accounts-tab="accounts" aria-controls="accountsPanel" aria-selected="true">Accounts &amp; Debts</button><button id="sharingTabButton" class="workspace-tab" type="button" role="tab" data-accounts-tab="sharing" aria-controls="sharingPanel" aria-selected="false">Household Sharing</button></div>
+      <div id="accountsPanel" class="workspace-panel active" role="tabpanel" aria-labelledby="accountsTabButton" data-accounts-panel="accounts">
       <div class="dashboard-grid equal">
         <article class="panel form-panel retirement-account-form">
           <div class="panel-head"><div><span class="panel-kicker">MANUAL ACCOUNT</span><h2 id="accountFormTitle">Add an asset</h2></div></div>
@@ -624,7 +625,7 @@
       </div>
 
       </div>
-      <div class="workspace-panel" data-accounts-panel="sharing">
+      <div id="sharingPanel" class="workspace-panel" role="tabpanel" aria-labelledby="sharingTabButton" data-accounts-panel="sharing" hidden>
         <div class="sharing-layout"><article class="panel"><div class="panel-head"><div><span class="panel-kicker">SHARED HOUSEHOLD</span><h2>Invite your partner</h2></div><span id="householdRoleBadge" class="status-pill neutral">Loading…</span></div><p>Enter the Gmail address your spouse or partner will use. After Google authentication, Nirvana connects that user to the same household data.</p><form id="partnerInviteForm" class="stack-form"><label>Partner Gmail address<input name="email" type="email" required placeholder="partner@gmail.com"></label><input name="role" type="hidden" value="member"><button class="button button-primary" type="submit">Invite partner</button></form><p class="mini-disclaimer">Nirvana shares the entire household plan with accepted members. Do not invite an address you do not control.</p></article><article class="panel"><div class="panel-head"><div><span class="panel-kicker">MEMBERS</span><h2>Who can access this household</h2></div></div><div id="householdMembers" class="member-list"></div><div class="panel-head secondary-head"><div><span class="panel-kicker">PENDING</span><h2>Invitations</h2></div></div><div id="householdInvites" class="member-list"></div></article></div>
         <article class="panel"><div class="panel-head"><div><span class="panel-kicker">HOUSEHOLD SELECTOR</span><h2>Your available households</h2></div></div><div id="householdMemberships" class="household-switch-list"></div></article>
       </div>
@@ -633,12 +634,12 @@
 
 
 
-  <aside id="alertsDrawer" class="alerts-drawer" aria-label="Financial alerts" aria-hidden="true">
-    <div class="alerts-drawer-head"><div><span class="panel-kicker">NIRVANA ALERTS</span><h2>Recommendations &amp; watch items</h2></div><button id="alertsClose" class="icon-button" type="button" aria-label="Close alerts">×</button></div>
-    <div class="alerts-toolbar"><span id="alertsUpdatedAt">Weekly and nightly agents</span><button id="resetDriftTargetsDrawer" class="text-button" type="button">Use current mix as target</button></div>
-    <div id="alertsDrawerList" class="alerts-list"></div>
-  </aside>
-  <div id="alertsBackdrop" class="drawer-backdrop hidden"></div>
+  <section id="alertsDrawer" class="alerts-drawer" role="dialog" aria-modal="true" aria-labelledby="alertsDialogTitle" aria-hidden="true" hidden>
+    <div class="alerts-drawer-head"><div><span class="panel-kicker">NIRVANA ALERTS</span><h2 id="alertsDialogTitle">Recommendations &amp; watch items</h2></div><button id="alertsClose" class="modal-close-button" type="button" aria-label="Close alerts"><span aria-hidden="true">×</span></button></div>
+    <div class="alerts-toolbar"><span id="alertsUpdatedAt">Weekly and nightly agents</span><button id="resetDriftTargetsDrawer" class="button button-secondary button-compact" type="button">Use current mix as target</button></div>
+    <div id="alertsDrawerList" class="alerts-list" aria-live="polite"></div>
+  </section>
+  <div id="alertsBackdrop" class="drawer-backdrop" hidden></div>
 
   <button id="assistantFab" class="assistant-fab" type="button" aria-label="Open Nirvana AI">✦</button>
   <aside id="assistantDrawer" class="assistant-drawer" aria-label="Nirvana AI Planner">
@@ -674,6 +675,6 @@
   <script src="/portfolio-ui.js?v=0.5.0" defer></script>
   <script src="/what-if-ui.js?v=0.6.1" defer></script>
   <script src="/holdings-ui.js?v=0.8.0" defer></script>
-  <script src="/intelligence-ui.js?v=0.8.0" defer></script>
+  <script src="/intelligence-ui.js?v=0.8.1" defer></script>
 </body>
 </html>
