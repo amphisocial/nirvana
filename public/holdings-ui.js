@@ -9,6 +9,7 @@
   let loaded = false;
   let loading = false;
   let currentPrompt = '';
+  let activeTab = 'insights';
 
   async function api(url, options = {}) {
     const response = await fetch(url, {
@@ -45,6 +46,42 @@
   function destroyChart(name) {
     charts[name]?.destroy();
     delete charts[name];
+  }
+
+
+  function showHoldingsTab(name, options = {}) {
+    const selected = name === 'manage' ? 'manage' : 'insights';
+    activeTab = selected;
+
+    $$('[data-holdings-tab]').forEach((button) => {
+      const active = button.dataset.holdingsTab === selected;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', String(active));
+      button.tabIndex = active ? 0 : -1;
+    });
+
+    $$('.holdings-tab-panel').forEach((panel) => {
+      panel.classList.toggle('active', panel.dataset.holdingsPanel === selected);
+    });
+
+    window.setTimeout(() => {
+      if (selected === 'insights') {
+        Object.values(charts).forEach((chart) => chart?.resize());
+        if (!loaded && !loading) runAnalysis('', true);
+      } else {
+        window.dispatchEvent(new Event('resize'));
+        if (options.scroll !== false) {
+          $('#portfolioAccountSelect')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
+    }, 70);
+  }
+
+  function openManageHoldings(options = {}) {
+    if (!$('#holdings')?.classList.contains('active-view')) {
+      $('[data-view="holdings"]')?.click();
+    }
+    showHoldingsTab('manage', options);
   }
 
   function selectedTypes() {
@@ -394,6 +431,10 @@
 
   function activateHoldingsPage() {
     window.setTimeout(() => {
+      if (activeTab === 'manage') {
+        window.dispatchEvent(new Event('resize'));
+        return;
+      }
       Object.values(charts).forEach((chart) => chart?.resize());
       if (!loaded && !loading) runAnalysis('', true);
     }, 60);
@@ -401,6 +442,25 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     if (!$('#holdings')) return;
+
+    $$('[data-holdings-tab]').forEach((button) => {
+      button.addEventListener('click', () => showHoldingsTab(button.dataset.holdingsTab));
+      button.addEventListener('keydown', (event) => {
+        if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+        event.preventDefault();
+        const next = button.dataset.holdingsTab === 'insights' ? 'manage' : 'insights';
+        showHoldingsTab(next, { scroll: false });
+        $(`[data-holdings-tab="${next}"]`)?.focus();
+      });
+    });
+
+    $$('[data-holdings-open-manage]').forEach((button) => {
+      button.addEventListener('click', () => openManageHoldings());
+    });
+
+    document.addEventListener('nirvana:open-portfolio', () => {
+      openManageHoldings();
+    });
 
     $$('[data-holdings-account-type]').forEach((input) => {
       input.addEventListener('change', () => runAnalysis(currentPrompt, false));
@@ -432,6 +492,7 @@
       button.addEventListener('click', activateHoldingsPage);
     });
 
+    showHoldingsTab('insights', { scroll: false });
     if ($('#holdings').classList.contains('active-view')) activateHoldingsPage();
   });
 })();
