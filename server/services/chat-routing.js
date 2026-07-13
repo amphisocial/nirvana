@@ -60,8 +60,11 @@ export function selectSkillNames(message) {
     names.push('stock-market-analyst');
     names.push('quant-equity-research');
   }
-  if (/(what[- ]?if|scenario|target price|allocation|concentration|holding|portfolio risk|risk mix|brokerage|401\s*\(?k\)?|ira|buy|sell)/i.test(message)) {
+  if (/(what[- ]?if|scenario|target price|allocation|concentration|buy|sell|holdings|brokerage|ira|401\s*\(?k\)?|risk mix)/i.test(message)) {
     names.push('portfolio-scenario-analyst');
+  }
+  if (/(what changed|this week|weekly brief|nirvana'?s desk|alert|drift|dividend|interest calendar|actual spending|planned spending|goal progress|partner|shared household)/i.test(message)) {
+    names.push('financial-intelligence-agent');
   }
   return [...new Set(names)];
 }

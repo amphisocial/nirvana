@@ -10,8 +10,15 @@ function int(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function number(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+const nodeEnv = process.env.NODE_ENV || 'development';
+
 export const config = {
-  nodeEnv: process.env.NODE_ENV || 'development',
+  nodeEnv,
   port: int(process.env.PORT, 5015),
   appUrl: process.env.APP_URL || 'http://localhost:5015',
   sessionSecret: process.env.SESSION_SECRET || 'development-only-change-me',
@@ -52,6 +59,16 @@ export const config = {
     newsCacheMinutes: int(process.env.MARKET_NEWS_CACHE_MINUTES, 30),
     newsLimit: int(process.env.MARKET_NEWS_LIMIT, 8),
     delayNotice: process.env.MARKET_DATA_DELAY_NOTICE || 'Market data may be delayed or incomplete.'
+  },
+  agent: {
+    schedulerEnabled: bool(process.env.AGENT_SCHEDULER_ENABLED, nodeEnv === 'production'),
+    timezone: process.env.AGENT_TIMEZONE || 'America/New_York',
+    nightlyHour: int(process.env.AGENT_NIGHTLY_HOUR, 2),
+    weeklyDay: int(process.env.AGENT_WEEKLY_DAY, 0),
+    weeklyHour: int(process.env.AGENT_WEEKLY_HOUR, 3),
+    maxSymbolsPerRun: int(process.env.AGENT_MAX_SYMBOLS_PER_RUN, 250),
+    driftThresholdPct: number(process.env.AGENT_DRIFT_THRESHOLD_PCT, 5),
+    largeExpenseThreshold: number(process.env.AGENT_LARGE_EXPENSE_THRESHOLD, 1000)
   },
   plaid: {
     enabled: bool(process.env.PLAID_ENABLED, false),

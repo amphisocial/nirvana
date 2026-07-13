@@ -21,6 +21,8 @@
       <button class="nav-item" data-view="cashflow" title="Income &amp; Expenses"><span class="nav-icon">↕</span><span class="nav-label">Income &amp; Expenses</span></button>
       <button class="nav-item" data-view="scenario" title="What-if Lab"><span class="nav-icon">◇</span><span class="nav-label">What-if Lab</span></button>
       <button class="nav-item" data-view="holdings" title="Holdings"><span class="nav-icon">◫</span><span class="nav-label">Holdings</span></button>
+      <button class="nav-item" data-view="insights" title="Financial Intelligence"><span class="nav-icon">◈</span><span class="nav-label">Insights</span></button>
+      <button class="nav-item" data-view="goals" title="Goals"><span class="nav-icon">◎</span><span class="nav-label">Goals</span></button>
       <button class="nav-item" data-view="research" title="Research AI"><span class="nav-icon">✦</span><span class="nav-label">Research AI</span></button>
       <button class="nav-item" data-view="accounts" title="Accounts"><span class="nav-icon">▣</span><span class="nav-label">Accounts</span></button>
     </nav>
@@ -33,7 +35,7 @@
   <main class="app-main">
     <header class="app-header">
       <div><p class="eyebrow">FINANCIAL COMMAND CENTER</p><h1 id="pageTitle">Overview</h1></div>
-      <div class="header-actions"><button id="assistantToggle" class="assistant-toggle" type="button">✦ Ask Nirvana</button><span id="userLabel" class="user-chip">Loading…</span><button id="refreshButton" class="icon-button" aria-label="Refresh dashboard">↻</button></div>
+      <div class="header-actions"><button id="assistantToggle" class="assistant-toggle" type="button">✦ Ask Nirvana</button><button id="alertBell" class="alert-bell" type="button" aria-label="Open financial alerts" title="Financial alerts"><span aria-hidden="true">🔔</span><b id="alertCount" class="alert-count hidden">0</b></button><span id="userLabel" class="user-chip">Loading…</span><button id="refreshButton" class="icon-button" aria-label="Refresh dashboard">↻</button></div>
     </header>
 
     <div id="globalAlert" class="alert hidden" role="alert"></div>
@@ -346,6 +348,7 @@
       <div class="holdings-tabs" role="tablist" aria-label="Holdings workspace">
         <button class="holdings-tab active" type="button" role="tab" aria-selected="true" data-holdings-tab="insights">Portfolio Intelligence &amp; What-If</button>
         <button class="holdings-tab" type="button" role="tab" aria-selected="false" data-holdings-tab="manage">Manage Holdings</button>
+        <button class="holdings-tab" type="button" role="tab" aria-selected="false" data-holdings-tab="research">Research &amp; Earnings</button>
       </div>
 
       <div class="holdings-tab-panel active" data-holdings-panel="insights">
@@ -486,8 +489,66 @@
           </div>
         </article>
       </div>
+      <div class="holdings-tab-panel" data-holdings-panel="research">
+        <article class="panel research-agent-panel">
+          <div class="panel-head">
+            <div><span class="panel-kicker">STREET &amp; EARNINGS AGENTS</span><h2>Latest earnings, consensus target, and rating</h2></div>
+            <div class="inline-actions"><button id="resetPortfolioTargets" class="button button-secondary" type="button">Use current mix as drift target</button><button id="refreshHoldingResearch" class="button button-primary" type="button">↻ Run holding research agents</button></div>
+          </div>
+          <p class="chart-note">Targets and ratings are third-party consensus estimates, not Nirvana recommendations. Earnings summaries cite the research sources saved by the agent.</p>
+          <div class="research-filter-row"><label>Filter holdings<input id="holdingResearchSearch" type="search" placeholder="Symbol or company"></label><label>Street view<select id="holdingResearchRating"><option value="">All ratings</option><option>Strong Buy</option><option>Buy</option><option>Hold</option><option>Sell</option><option>Strong Sell</option><option>Unrated</option></select></label><span id="holdingResearchStatus" class="status-pill neutral">Open this tab to load research</span></div>
+          <div class="table-wrap research-holdings-table"><table><thead><tr><th>Holding</th><th>Current value</th><th>Street target</th><th>Consensus</th><th>Latest earnings agent summary</th><th>Upcoming</th><th>Refreshed</th></tr></thead><tbody id="holdingResearchRows"></tbody></table></div>
+        </article>
+      </div>
+
     </section>
 
+
+
+    <section id="insights" class="view">
+      <div class="intelligence-hero">
+        <div><span class="panel-kicker">AGENT FINANCIAL CENTER</span><h2>What changed, what is coming, and what deserves attention</h2><p>Nirvana captures daily financial state, refreshes a ten-year plan weekly, and turns market, spending, portfolio, and goal signals into explainable actions.</p></div>
+        <div class="inline-actions"><button id="printIntelligence" class="button button-secondary" type="button">Export / Print PDF</button><button id="runWeeklyAgents" class="button button-primary" type="button">Run weekly agents now</button></div>
+      </div>
+      <div class="workspace-tabs" role="tablist" aria-label="Financial intelligence views">
+        <button class="workspace-tab active" type="button" data-intelligence-tab="week" aria-selected="true">What changed this week?</button>
+        <button class="workspace-tab" type="button" data-intelligence-tab="desk" aria-selected="false">From Nirvana's Desk</button>
+        <button class="workspace-tab" type="button" data-intelligence-tab="calendar" aria-selected="false">Income Calendar</button>
+        <button class="workspace-tab" type="button" data-intelligence-tab="spending" aria-selected="false">Spending Actuals</button>
+      </div>
+
+      <div class="workspace-panel active" data-intelligence-panel="week">
+        <div class="metric-grid metric-grid-five intelligence-metrics">
+          <article class="metric-card metric-featured"><span>Net-worth movement</span><strong id="weekNetWorthChange">—</strong><small id="weekComparisonPeriod">Waiting for snapshots</small></article>
+          <article class="metric-card"><span>Asset movement</span><strong id="weekAssetChange">—</strong><small>Account balances</small></article>
+          <article class="metric-card"><span>Debt movement</span><strong id="weekDebtChange">—</strong><small>Liability balances</small></article>
+          <article class="metric-card"><span>10-year forecast</span><strong id="weekTenYearNetWorth">—</strong><small id="weekForecastAsOf">Weekly agent</small></article>
+          <article class="metric-card"><span>Open alerts</span><strong id="weekAlertCount">—</strong><small>Drift, goals, and spending</small></article>
+        </div>
+        <article class="panel weekly-explanation-panel"><div class="panel-head"><div><span class="panel-kicker">MOVEMENT EXPLANATION</span><h2 id="weekMovementHeadline">Building the weekly comparison…</h2></div><span id="weeklyAgentRunStatus" class="status-pill neutral">Checking agent status</span></div><p id="weekMovementExplanation" class="lead-copy"></p><div class="dashboard-grid equal"><div><h3>Largest asset movements</h3><div id="weekAccountMovements" class="movement-list"></div></div><div><h3>Largest debt movements</h3><div id="weekDebtMovements" class="movement-list"></div></div></div></article>
+        <article class="panel chart-panel"><div class="panel-head"><div><span class="panel-kicker">WEEKLY 10-YEAR REFRESH</span><h2>Net worth, assets, and debt</h2></div><span class="status-pill neutral">Saved weekly forecast</span></div><div class="chart-wrap chart-extra-tall"><canvas id="tenYearForecastChart"></canvas></div><p id="tenYearForecastNote" class="chart-note">The agent uses saved plan assumptions and account data; this is a planning forecast, not a guarantee.</p></article>
+        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">WEEKLY AI BRIEFING</span><h2 id="weeklyBriefingTitle">Waiting for the first weekly agent run</h2></div></div><p id="weeklyBriefingSummary" class="lead-copy"></p><div class="briefing-columns"><div><h3>Wins</h3><div id="weeklyWins" class="briefing-list"></div></div><div><h3>Risks</h3><div id="weeklyRisks" class="briefing-list"></div></div><div><h3>Next actions</h3><div id="weeklyActions" class="briefing-list"></div></div></div></article>
+      </div>
+
+      <div class="workspace-panel" data-intelligence-panel="desk">
+        <div class="desk-layout"><article class="panel desk-article"><div class="panel-head"><div><span class="panel-kicker">NIGHTLY MARKET BLOG</span><h2 id="deskTitle">From Nirvana's Desk</h2></div><button id="printDesk" class="text-button" type="button">Print article</button></div><p id="deskDek" class="desk-dek"></p><div id="deskSections" class="desk-sections"></div><div class="desk-action-grid"><div><h3>Watch list</h3><div id="deskWatchItems" class="briefing-list"></div></div><div><h3>Proactive risk actions</h3><div id="deskRiskActions" class="briefing-list"></div></div><div><h3>Short-term scenarios</h3><div id="deskShortTerm" class="briefing-list"></div></div><div><h3>Long-term practices</h3><div id="deskLongTerm" class="briefing-list"></div></div></div><div id="deskSources" class="source-list"></div><p class="mini-disclaimer">Educational market commentary. Tactical ideas are scenarios, not promises or personalized trade instructions.</p></article><aside class="panel desk-archive"><div class="panel-head"><div><span class="panel-kicker">ARCHIVE</span><h2>Recent editions</h2></div></div><div id="deskArchiveList" class="archive-list"></div></aside></div>
+      </div>
+
+      <div class="workspace-panel" data-intelligence-panel="calendar">
+        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">UPCOMING CASH FLOW</span><h2>Dividends, interest, and earnings dates</h2></div><label class="compact-filter">Show<select id="calendarTypeFilter"><option value="">All events</option><option value="dividend">Dividends</option><option value="interest">Interest</option><option value="earnings">Earnings</option></select></label></div><div id="incomeCalendar" class="calendar-list"></div><p class="chart-note">Dividend and earnings dates can change. Estimated interest uses current balance and the account's saved annual growth assumption.</p></article>
+      </div>
+
+      <div class="workspace-panel" data-intelligence-panel="spending">
+        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">PLAN VS ACTUAL</span><h2>Monthly spending close</h2></div><div class="inline-actions"><label class="compact-filter">Month<input id="spendingMonth" type="month"></label><button id="saveExpenseActuals" class="button button-primary" type="button">Save actuals</button></div></div><div class="dashboard-grid two-one"><div class="chart-wrap chart-tall"><canvas id="spendingActualChart"></canvas></div><div><h3>Large expense reminders</h3><div id="largeExpenseReminders" class="reminder-list"></div></div></div><div class="table-wrap spending-table"><table><thead><tr><th>Expense</th><th>Category</th><th>Planned</th><th>Actual</th><th>Variance</th><th>Notes</th></tr></thead><tbody id="spendingActualRows"></tbody></table></div></article>
+      </div>
+    </section>
+
+    <section id="goals" class="view">
+      <div class="goals-hero"><div><span class="panel-kicker">GOAL PROGRESS</span><h2>Connect today's accounts to the outcomes they fund</h2><p>Track retirement, education, home, emergency, travel, family, and legacy goals using linked account balances or a manually entered current amount.</p></div><button id="addGoalButton" class="button button-primary" type="button">Add goal</button></div>
+      <div class="metric-grid goals-summary"><article class="metric-card metric-featured"><span>Active goals</span><strong id="activeGoalCount">—</strong><small>Currently tracked</small></article><article class="metric-card"><span>Total target</span><strong id="goalTargetTotal">—</strong><small>Across active goals</small></article><article class="metric-card"><span>Currently funded</span><strong id="goalCurrentTotal">—</strong><small>Linked or manual value</small></article><article class="metric-card"><span>Remaining</span><strong id="goalRemainingTotal">—</strong><small>To target</small></article></div>
+      <div id="goalCards" class="goal-card-grid"></div>
+      <article id="goalEditorPanel" class="panel goal-editor hidden"><div class="panel-head"><div><span class="panel-kicker">GOAL DETAILS</span><h2 id="goalEditorTitle">Add goal</h2></div><button id="closeGoalEditor" class="icon-button" type="button" aria-label="Close goal editor">×</button></div><form id="goalForm" class="stack-form"><input name="id" type="hidden"><div class="form-row"><label>Goal name<input name="name" required placeholder="Emergency fund or College 2030"></label><label>Type<select name="goalType"><option value="retirement">Retirement</option><option value="education">Education</option><option value="home">Home</option><option value="emergency">Emergency fund</option><option value="travel">Travel</option><option value="family">Family support</option><option value="legacy">Legacy</option><option value="other">Other</option></select></label></div><div class="form-row"><label>Target amount<input name="targetAmount" type="number" min="1" step="100" required></label><label>Target date<input name="targetDate" type="date"></label></div><div class="form-row"><label>Manual current amount<input name="manualCurrentAmount" type="number" min="0" step="100" value="0"><small>Used only when no account is linked.</small></label><label>Priority<select name="priority"><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select></label></div><fieldset><legend>Linked accounts</legend><div id="goalAccountOptions" class="goal-account-options"></div><small>Each account can fund one active goal so balances are not double counted. Use a manual current amount when funding is shared.</small></fieldset><label>Status<select name="status"><option value="active">Active</option><option value="completed">Completed</option><option value="paused">Paused</option></select></label><label>Notes<textarea name="notes" rows="3"></textarea></label><div class="form-actions"><button class="button button-primary" type="submit">Save goal</button><button id="deleteGoalButton" class="button button-secondary hidden" type="button">Delete goal</button></div></form></article>
+    </section>
 
     <section id="research" class="view">
       <div class="research-layout">
@@ -503,6 +564,8 @@
     </section>
 
     <section id="accounts" class="view">
+      <div class="workspace-tabs account-workspace-tabs" role="tablist" aria-label="Accounts workspace"><button class="workspace-tab active" type="button" data-accounts-tab="accounts" aria-selected="true">Accounts &amp; Debts</button><button class="workspace-tab" type="button" data-accounts-tab="sharing" aria-selected="false">Household Sharing</button></div>
+      <div class="workspace-panel active" data-accounts-panel="accounts">
       <div class="dashboard-grid equal">
         <article class="panel form-panel retirement-account-form">
           <div class="panel-head"><div><span class="panel-kicker">MANUAL ACCOUNT</span><h2 id="accountFormTitle">Add an asset</h2></div></div>
@@ -560,10 +623,22 @@
         <article class="panel form-panel"><div class="panel-head"><div><span class="panel-kicker">CSV BACKUP</span><h2>Import holdings</h2></div></div><p class="muted">Upload holdings without connecting a financial institution. Existing account + symbol rows are updated.</p><form id="csvForm" class="stack-form"><label class="file-drop">Choose CSV<input name="file" type="file" accept=".csv,text/csv" required></label><button class="button button-secondary" type="submit">Import CSV</button></form><a class="text-link" href="/holdings-template.csv" download>Download CSV template</a><div id="plaidMessage" class="mini-disclaimer"></div></article>
       </div>
 
-
+      </div>
+      <div class="workspace-panel" data-accounts-panel="sharing">
+        <div class="sharing-layout"><article class="panel"><div class="panel-head"><div><span class="panel-kicker">SHARED HOUSEHOLD</span><h2>Invite your partner</h2></div><span id="householdRoleBadge" class="status-pill neutral">Loading…</span></div><p>Enter the Gmail address your spouse or partner will use. After Google authentication, Nirvana connects that user to the same household data.</p><form id="partnerInviteForm" class="stack-form"><label>Partner Gmail address<input name="email" type="email" required placeholder="partner@gmail.com"></label><input name="role" type="hidden" value="member"><button class="button button-primary" type="submit">Invite partner</button></form><p class="mini-disclaimer">Nirvana shares the entire household plan with accepted members. Do not invite an address you do not control.</p></article><article class="panel"><div class="panel-head"><div><span class="panel-kicker">MEMBERS</span><h2>Who can access this household</h2></div></div><div id="householdMembers" class="member-list"></div><div class="panel-head secondary-head"><div><span class="panel-kicker">PENDING</span><h2>Invitations</h2></div></div><div id="householdInvites" class="member-list"></div></article></div>
+        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">HOUSEHOLD SELECTOR</span><h2>Your available households</h2></div></div><div id="householdMemberships" class="household-switch-list"></div></article>
+      </div>
     </section>
   </main>
 
+
+
+  <aside id="alertsDrawer" class="alerts-drawer" aria-label="Financial alerts" aria-hidden="true">
+    <div class="alerts-drawer-head"><div><span class="panel-kicker">NIRVANA ALERTS</span><h2>Recommendations &amp; watch items</h2></div><button id="alertsClose" class="icon-button" type="button" aria-label="Close alerts">×</button></div>
+    <div class="alerts-toolbar"><span id="alertsUpdatedAt">Weekly and nightly agents</span><button id="resetDriftTargetsDrawer" class="text-button" type="button">Use current mix as target</button></div>
+    <div id="alertsDrawerList" class="alerts-list"></div>
+  </aside>
+  <div id="alertsBackdrop" class="drawer-backdrop hidden"></div>
 
   <button id="assistantFab" class="assistant-fab" type="button" aria-label="Open Nirvana AI">✦</button>
   <aside id="assistantDrawer" class="assistant-drawer" aria-label="Nirvana AI Planner">
@@ -598,6 +673,7 @@
   <script src="/planning-ui.js?v=0.5.1" defer></script>
   <script src="/portfolio-ui.js?v=0.5.0" defer></script>
   <script src="/what-if-ui.js?v=0.6.1" defer></script>
-  <script src="/holdings-ui.js?v=0.7.1" defer></script>
+  <script src="/holdings-ui.js?v=0.8.0" defer></script>
+  <script src="/intelligence-ui.js?v=0.8.0" defer></script>
 </body>
 </html>

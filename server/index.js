@@ -19,9 +19,13 @@ import { whatIfRouter } from './routes/what-if.js';
 import { holdingsLabRouter } from './routes/holdings-lab.js';
 import { retirementRouter } from './routes/retirement.js';
 import { planningRouter } from './routes/planning.js';
+import { intelligenceRouter } from './routes/intelligence.js';
+import { goalsRouter } from './routes/goals.js';
+import { householdSharingRouter } from './routes/household-sharing.js';
 import { chatRouter } from './routes/chat.js';
 import { settingsRouter } from './routes/settings.js';
 import { stripeRouter, stripeWebhookHandler } from './routes/stripe.js';
+import { startAgentScheduler } from './services/agent-scheduler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, '../public');
@@ -47,7 +51,6 @@ app.use(helmet({
   }
 }));
 
-// Stripe requires the original request bytes for signature verification.
 app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), stripeWebhookHandler);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false, limit: '1mb' }));
@@ -82,13 +85,14 @@ app.get('/api/health', async (_req, res) => {
     service: 'nirvana',
     status: database === 'ok' ? 'ok' : 'degraded',
     database,
-    version: '0.7.0'
+    version: '0.8.0',
+    agentScheduler: config.agent.schedulerEnabled ? 'enabled' : 'disabled'
   });
 });
 
 const apiLimiter = rateLimit({
   windowMs: 60_000,
-  limit: 180,
+  limit: 240,
   standardHeaders: 'draft-8',
   legacyHeaders: false
 });
@@ -106,9 +110,12 @@ app.use('/api/accounts', requireAuth, householdContext, accountsRouter);
 app.use('/api/market', requireAuth, householdContext, marketRouter);
 app.use('/api/scenarios', requireAuth, householdContext, scenariosRouter);
 app.use('/api/what-if', requireAuth, householdContext, whatIfRouter);
-app.use('/api/holdings-lab', aiLimiter, requireAuth, householdContext, holdingsLabRouter);
+app.use('/api/holdings-lab', requireAuth, householdContext, holdingsLabRouter);
 app.use('/api/retirement', requireAuth, householdContext, retirementRouter);
 app.use('/api/planning', requireAuth, householdContext, planningRouter);
+app.use('/api/intelligence', requireAuth, householdContext, intelligenceRouter);
+app.use('/api/goals', requireAuth, householdContext, goalsRouter);
+app.use('/api/household', requireAuth, householdContext, householdSharingRouter);
 app.use('/api/chat', aiLimiter, requireAuth, householdContext, chatRouter);
 app.use('/api/settings', requireAuth, householdContext, settingsRouter);
 app.use('/api/stripe', requireAuth, householdContext, stripeRouter);
@@ -118,9 +125,7 @@ app.use(express.static(publicDir, {
   etag: true,
   maxAge: config.nodeEnv === 'production' ? '1h' : 0,
   setHeaders(res, filePath) {
-    if (filePath.endsWith('.html')) {
-      res.setHeader('Cache-Control', 'no-cache');
-    }
+    if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache');
   }
 }));
 
@@ -144,9 +149,11 @@ app.use((error, _req, res, _next) => {
 const server = app.listen(config.port, () => {
   console.log(`Nirvana listening on ${config.appUrl} (port ${config.port})`);
 });
+const stopAgentScheduler = startAgentScheduler();
 
 async function shutdown(signal) {
   console.log(`${signal} received; shutting down Nirvana`);
+  stopAgentScheduler();
   server.close(async () => {
     await pool.end().catch(() => {});
     process.exit(0);

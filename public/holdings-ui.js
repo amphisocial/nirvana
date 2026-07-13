@@ -50,7 +50,7 @@
 
 
   function showHoldingsTab(name, options = {}) {
-    const selected = name === 'manage' ? 'manage' : 'insights';
+    const selected = ['insights', 'manage', 'research'].includes(name) ? name : 'insights';
     activeTab = selected;
 
     $$('[data-holdings-tab]').forEach((button) => {
@@ -68,11 +68,13 @@
       if (selected === 'insights') {
         Object.values(charts).forEach((chart) => chart?.resize());
         if (!loaded && !loading) runAnalysis('', true);
-      } else {
+      } else if (selected === 'manage') {
         window.dispatchEvent(new Event('resize'));
         if (options.scroll !== false) {
           $('#portfolioAccountSelect')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
+      } else {
+        document.dispatchEvent(new CustomEvent('nirvana:load-holding-research'));
       }
     }, 70);
   }
@@ -448,7 +450,10 @@
       button.addEventListener('keydown', (event) => {
         if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
         event.preventDefault();
-        const next = button.dataset.holdingsTab === 'insights' ? 'manage' : 'insights';
+        const order = ['insights', 'manage', 'research'];
+        const currentIndex = order.indexOf(button.dataset.holdingsTab);
+        const direction = event.key === 'ArrowRight' ? 1 : -1;
+        const next = order[(currentIndex + direction + order.length) % order.length];
         showHoldingsTab(next, { scroll: false });
         $(`[data-holdings-tab="${next}"]`)?.focus();
       });
@@ -492,6 +497,7 @@
       button.addEventListener('click', activateHoldingsPage);
     });
 
+    window.openNirvanaHoldingsTab = showHoldingsTab;
     showHoldingsTab('insights', { scroll: false });
     if ($('#holdings').classList.contains('active-view')) activateHoldingsPage();
   });
