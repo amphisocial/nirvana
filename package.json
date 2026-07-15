@@ -1,6 +1,6 @@
 {
   "name": "nirvana-financial-planner",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "private": true,
   "type": "module",
   "description": "Nirvana personal finance, retirement, agentic portfolio, real-estate, and scenario planning platform.",
@@ -23,6 +23,7 @@
     "express-session": "^1.18.2",
     "helmet": "^8.1.0",
     "multer": "^2.0.2",
+    "nodemailer": "^9.0.3",
     "openai": "^5.12.2",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",

@@ -780,7 +780,18 @@
       form.reset();
       state.loaded.delete('sharing');
       await loadSharing(true);
-      notify(result.status === 'accepted' ? 'Partner already had a Nirvana login and was added.' : 'Partner invitation saved. They can sign in with that Gmail address.');
+      const delivery = result.emailDelivery || {};
+      if (result.status === 'accepted') {
+        notify(delivery.sent
+          ? 'Partner already had a Nirvana login, was added, and received a notification email.'
+          : 'Partner already had a Nirvana login and was added.');
+      } else if (delivery.sent) {
+        notify('Partner invitation email sent. They should sign in with that exact Google address.');
+      } else if (delivery.skipped) {
+        notify('Partner invitation saved. Email delivery is not configured, but they can still sign in with that Google address.');
+      } else {
+        notify('Partner invitation saved, but the email could not be sent. They can still sign in with that Google address.');
+      }
     } catch (error) { notify(error.message); }
   }
 

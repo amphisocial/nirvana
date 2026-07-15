@@ -32,6 +32,17 @@ export const config = {
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
     callbackUrl: process.env.GOOGLE_CALLBACK_URL || `${process.env.APP_URL || 'http://localhost:5015'}/auth/google/callback`
   },
+  email: {
+    enabled: bool(process.env.SMTP_ENABLED, false),
+    host: process.env.SMTP_HOST || null,
+    port: int(process.env.SMTP_PORT, 587),
+    secure: bool(process.env.SMTP_SECURE, false),
+    user: process.env.SMTP_USER || null,
+    password: process.env.SMTP_PASSWORD || null,
+    fromEmail: process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER || null,
+    fromName: process.env.SMTP_FROM_NAME || 'Nirvana',
+    replyTo: process.env.SMTP_REPLY_TO || null
+  },
   ai: {
     provider: (process.env.AI_PROVIDER || 'mock').toLowerCase(),
     model: process.env.AI_MODEL || 'gpt-5-mini',

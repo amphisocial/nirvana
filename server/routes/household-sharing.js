@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { pool, withTransaction } from '../db.js';
+import { sendHouseholdInviteEmail } from '../services/email-service.js';
 
 export const householdSharingRouter = Router();
 
@@ -53,6 +54,13 @@ householdSharingRouter.post('/invite', async (req, res, next) => {
     if (email === req.user.email.toLowerCase()) return res.status(400).json({ error: 'You already own this household' });
 
     const result = await withTransaction(async (client) => {
+      const householdResult = await client.query(`SELECT name FROM households WHERE id=$1`, [req.householdId]);
+      if (!householdResult.rowCount) {
+        const error = new Error('Household not found');
+        error.status = 404;
+        throw error;
+      }
+      const householdName = householdResult.rows[0].name;
       const existingUser = await client.query(`SELECT * FROM users WHERE lower(email)=lower($1)`, [email]);
       if (existingUser.rowCount) {
         const user = existingUser.rows[0];
@@ -74,7 +82,7 @@ householdSharingRouter.post('/invite', async (req, res, next) => {
             VALUES ($1,$2,$3,'accepted',$4,$5,now())
             RETURNING *`, [req.householdId, email, value.role, req.user.id, user.id]);
         }
-        return { status: 'accepted', invite: invite.rows[0], member: user };
+        return { status: 'accepted', invite: invite.rows[0], member: user, householdName };
       }
       const pending = await client.query(`
         SELECT id FROM household_invites
@@ -88,9 +96,29 @@ householdSharingRouter.post('/invite', async (req, res, next) => {
         : await client.query(`
             INSERT INTO household_invites (household_id, email, role, invited_by_user_id)
             VALUES ($1,$2,$3,$4) RETURNING *`, [req.householdId, email, value.role, req.user.id]);
-      return { status: 'pending', invite: invite.rows[0] };
+      return { status: 'pending', invite: invite.rows[0], householdName };
     });
-    res.status(201).json(result);
+
+    const { householdName, ...responseResult } = result;
+    let emailDelivery;
+    try {
+      emailDelivery = await sendHouseholdInviteEmail({
+        to: email,
+        inviterName: req.user.display_name || req.user.email,
+        householdName,
+        role: value.role,
+        accepted: result.status === 'accepted'
+      });
+    } catch (error) {
+      console.error('Household invitation email delivery failed', {
+        inviteId: result.invite?.id,
+        householdId: req.householdId,
+        error: error.message
+      });
+      emailDelivery = { sent: false, skipped: false, error: 'Email delivery failed' };
+    }
+
+    res.status(201).json({ ...responseResult, emailDelivery });
   } catch (error) { next(error); }
 });
 
