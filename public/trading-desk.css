@@ -1,0 +1,201 @@
+/* =====================================================================
+   Trading Desk & AI Inbox — extends Nirvana's sage/cream design system.
+   Signature element: the "decision memo" recommendation card, framed like
+   a desk ticket with an action rail down the left edge.
+   ===================================================================== */
+
+/* ---- Feature gate (feature off) ---- */
+.desk-gate { display: grid; place-items: center; padding: 2rem 0; }
+.desk-gate-card {
+  max-width: 560px; background: var(--surface, #fff);
+  border: 1px solid var(--line, #e3e1d8); border-radius: 18px;
+  padding: 2.2rem; text-align: left;
+  box-shadow: 0 24px 60px -44px rgba(24, 49, 42, .5);
+}
+.desk-gate-card h2 { margin: .5rem 0 .7rem; font-size: 1.5rem; }
+.desk-gate-card p { color: var(--ink-soft); margin: 0 0 1.4rem; }
+.desk-gate-admin { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.desk-gate-note { color: var(--ink-soft); font-size: .82rem; }
+
+/* ---- Workspace layout ---- */
+.desk-workspace { display: flex; flex-direction: column; gap: 1.1rem; }
+.desk-columns { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(280px, 1.15fr); gap: 1.1rem; }
+@media (max-width: 900px) { .desk-columns { grid-template-columns: 1fr; } }
+
+/* ---- Agent console + pipeline ---- */
+.desk-console .panel-head { margin-bottom: .4rem; }
+.desk-pipeline {
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  padding: 1rem 0 .3rem; margin-top: .3rem;
+}
+.desk-stage {
+  display: inline-flex; align-items: center; gap: .5rem;
+  padding: .4rem .8rem; border-radius: 999px;
+  background: var(--surface-soft, #f0efe8); color: var(--ink-soft);
+  font-size: .8rem; font-weight: 700; position: relative;
+  transition: background .25s ease, color .25s ease;
+}
+.desk-stage:not(:last-child)::after {
+  content: ""; width: 16px; height: 2px; margin-left: .3rem;
+  background: var(--line, #e3e1d8);
+}
+.desk-stage-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--line, #cfd4cd); transition: background .25s ease, box-shadow .25s ease;
+}
+.desk-stage.is-active { background: var(--accent-pale); color: var(--accent-dark); }
+.desk-stage.is-active .desk-stage-dot { background: var(--accent); box-shadow: 0 0 0 4px rgba(79, 117, 100, .18); animation: deskPulse 1s ease-in-out infinite; }
+.desk-stage.is-done { color: var(--ink); }
+.desk-stage.is-done .desk-stage-dot { background: var(--accent-dark); }
+@keyframes deskPulse { 0%,100% { box-shadow: 0 0 0 4px rgba(79,117,100,.18);} 50% { box-shadow: 0 0 0 7px rgba(79,117,100,.05);} }
+@media (prefers-reduced-motion: reduce) { .desk-stage.is-active .desk-stage-dot { animation: none; } }
+
+/* ---- Watchlist ---- */
+.desk-watchlist-form { display: grid; grid-template-columns: 1fr; gap: .5rem; margin: .6rem 0 1rem; }
+.desk-watchlist-form input { width: 100%; }
+.desk-watchlist-form button { justify-self: start; }
+.desk-watchlist-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .45rem; }
+.desk-watch-item {
+  display: flex; align-items: center; justify-content: space-between; gap: .8rem;
+  padding: .6rem .8rem; border: 1px solid var(--line, #e3e1d8); border-radius: 12px;
+  background: var(--surface, #fff);
+}
+.desk-watch-item .sym { font-weight: 800; letter-spacing: .02em; }
+.desk-watch-item .thesis { color: var(--ink-soft); font-size: .8rem; }
+.desk-watch-remove {
+  border: none; background: none; color: var(--ink-soft); cursor: pointer;
+  font-size: 1.05rem; line-height: 1; padding: .2rem .4rem; border-radius: 8px;
+}
+.desk-watch-remove:hover { background: var(--surface-soft, #f0efe8); color: var(--ink); }
+.desk-watch-empty { color: var(--ink-soft); font-size: .85rem; padding: .4rem 0; }
+
+/* ---- Inbox filters ---- */
+.desk-inbox-filters { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .3rem; }
+.desk-filter {
+  border: 1px solid var(--line, #e3e1d8); background: var(--surface, #fff);
+  color: var(--ink-soft); border-radius: 999px; padding: .4rem .85rem;
+  font-weight: 700; font-size: .82rem; cursor: pointer; display: inline-flex; align-items: center; gap: .4rem;
+}
+.desk-filter:hover { border-color: var(--accent); }
+.desk-filter.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+.desk-count {
+  min-width: 20px; padding: 0 .35rem; height: 18px; border-radius: 9px;
+  display: inline-grid; place-items: center; font-size: .72rem;
+  background: var(--surface-soft, #eceae2); color: var(--ink);
+}
+.desk-filter.active .desk-count { background: rgba(255,255,255,.22); color: #fff; }
+
+/* ---- Bulk bar ---- */
+.desk-bulk { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: .9rem; padding-top: .8rem; border-top: 1px dashed var(--line, #e3e1d8); }
+.desk-bulk span { font-weight: 700; font-size: .85rem; }
+
+/* =====================================================================
+   SIGNATURE: the decision memo card
+   ===================================================================== */
+.desk-inbox { display: flex; flex-direction: column; gap: .9rem; }
+.desk-memo {
+  position: relative; display: grid; grid-template-columns: 6px 1fr;
+  border: 1px solid var(--line, #e3e1d8); border-radius: 16px; overflow: hidden;
+  background: var(--surface, #fff); transition: box-shadow .2s ease, transform .2s ease;
+}
+.desk-memo:hover { box-shadow: 0 20px 44px -40px rgba(24,49,42,.55); }
+.desk-memo .memo-rail { background: var(--accent); }
+.desk-memo[data-action="sell"] .memo-rail,
+.desk-memo[data-action="trim"] .memo-rail { background: #b9552f; }
+.desk-memo[data-action="hold"] .memo-rail { background: #8a8f88; }
+.desk-memo[data-action="new_idea"] .memo-rail { background: #4f7564; }
+.desk-memo[data-reviewstatus="approved"] { background: linear-gradient(0deg, rgba(79,117,100,.05), rgba(79,117,100,.05)), var(--surface,#fff); }
+.desk-memo[data-reviewstatus="rejected"] { opacity: .72; }
+
+.memo-body { padding: 1.05rem 1.2rem 1.1rem; }
+.memo-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.memo-id { display: flex; align-items: center; gap: .7rem; }
+.memo-check { width: 16px; height: 16px; }
+.memo-symbol { font-size: 1.15rem; font-weight: 850; letter-spacing: .01em; }
+.memo-company { color: var(--ink-soft); font-size: .8rem; margin-left: .1rem; }
+.memo-action-chip {
+  text-transform: uppercase; letter-spacing: .08em; font-size: .68rem; font-weight: 850;
+  padding: .28rem .6rem; border-radius: 8px; background: var(--accent-pale); color: var(--accent-dark);
+}
+.memo-action-chip[data-a="sell"], .memo-action-chip[data-a="trim"] { background: #f4dfd5; color: #99451f; }
+.memo-action-chip[data-a="hold"] { background: #ececea; color: #5a5f58; }
+.memo-origin { font-size: .68rem; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .07em; }
+
+.memo-conviction { display: flex; align-items: center; gap: .5rem; margin-top: .55rem; }
+.conviction-meter { display: inline-flex; gap: 3px; }
+.conviction-meter i { width: 22px; height: 6px; border-radius: 3px; background: var(--surface-soft,#e7e5dd); display: inline-block; }
+.conviction-meter i.on { background: var(--accent); }
+.memo-conviction small { color: var(--ink-soft); font-size: .78rem; }
+
+.memo-thesis { margin: .7rem 0 .4rem; color: var(--ink); font-size: .92rem; line-height: 1.5; }
+
+/* Trade plan grid */
+.memo-plan { display: grid; grid-template-columns: repeat(auto-fit, minmax(88px,1fr)); gap: .5rem; margin: .7rem 0; }
+.memo-plan .cell { background: var(--surface-soft,#f4f2ec); border-radius: 10px; padding: .5rem .6rem; }
+.memo-plan .cell span { display: block; font-size: .66rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-soft); }
+.memo-plan .cell strong { font-size: .95rem; font-variant-numeric: tabular-nums; }
+.memo-plan .cell.target strong { color: var(--accent-dark); }
+.memo-plan .cell.stop strong { color: #b9552f; }
+
+/* Signals + risk chips */
+.memo-detail-toggle { background: none; border: none; color: var(--accent-dark); font-weight: 750; cursor: pointer; padding: .3rem 0; font-size: .82rem; }
+.memo-detail { display: none; margin-top: .3rem; }
+.memo-detail.open { display: block; }
+.memo-chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: .4rem 0; }
+.memo-chip { font-size: .74rem; padding: .28rem .55rem; border-radius: 8px; background: var(--surface-soft,#f0efe8); color: var(--ink-soft); }
+.memo-chip.bull { background: #e2efe6; color: #2f6a4a; }
+.memo-chip.bear { background: #f4dfd5; color: #99451f; }
+.memo-chip.risk-ok::before { content: "✓ "; color: #2f6a4a; }
+.memo-chip.risk-fail { background: #f4dfd5; color: #99451f; }
+.memo-chip.risk-fail::before { content: "✕ "; }
+.memo-gaps { color: var(--ink-soft); font-size: .78rem; margin-top: .4rem; }
+
+/* Action rail */
+.memo-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .9rem; padding-top: .85rem; border-top: 1px solid var(--line,#eee); }
+.memo-btn { border-radius: 10px; padding: .5rem .9rem; font-weight: 750; font-size: .85rem; cursor: pointer; border: 1px solid var(--line,#e3e1d8); background: var(--surface,#fff); color: var(--ink); }
+.memo-btn.approve { background: var(--accent-dark); border-color: var(--accent-dark); color: #fff; }
+.memo-btn.approve:hover { filter: brightness(1.06); }
+.memo-btn.reject:hover { border-color: #b9552f; color: #b9552f; }
+.memo-btn.watch:hover, .memo-btn.snooze:hover { border-color: var(--accent); }
+.memo-reviewed { display: flex; align-items: center; gap: .6rem; margin-top: .9rem; padding-top: .85rem; border-top: 1px solid var(--line,#eee); color: var(--ink-soft); font-size: .82rem; }
+.memo-reviewed .badge { font-weight: 800; }
+.memo-reviewed .badge.approved { color: #2f6a4a; }
+.memo-reviewed .badge.rejected { color: #b9552f; }
+.memo-reviewed .badge.watchlisted { color: var(--accent-dark); }
+.memo-reopen { margin-left: auto; background: none; border: none; color: var(--accent-dark); cursor: pointer; font-weight: 700; font-size: .8rem; }
+
+/* Empty state */
+.desk-empty { text-align: center; padding: 2.4rem 1rem; color: var(--ink-soft); border: 1px dashed var(--line,#e3e1d8); border-radius: 16px; background: var(--surface,#fff); }
+.desk-empty strong { display: block; color: var(--ink); margin-bottom: .3rem; }
+
+/* Tab badge */
+.holdings-tab-desk { position: relative; }
+.desk-tab-badge {
+  margin-left: .45rem; background: var(--accent); color: #fff; border-radius: 999px;
+  font-size: .68rem; font-weight: 800; padding: .05rem .4rem; min-width: 18px; display: inline-grid; place-items: center;
+}
+
+/* ---- Settings drawer ---- */
+.desk-drawer { position: fixed; inset: 0; z-index: 60; display: block; }
+.desk-drawer-backdrop { position: absolute; inset: 0; background: rgba(24,49,42,.35); }
+.desk-drawer-body {
+  position: absolute; top: 0; right: 0; bottom: 0; width: min(420px, 92vw);
+  background: var(--paper,#faf8f2); padding: 1.6rem; overflow-y: auto;
+  box-shadow: -30px 0 60px -40px rgba(0,0,0,.5); animation: deskSlide .22s ease;
+}
+@keyframes deskSlide { from { transform: translateX(20px); opacity: .6; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .desk-drawer-body { animation: none; } }
+.desk-drawer-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.2rem; }
+.desk-drawer-close { border: none; background: none; font-size: 1.1rem; cursor: pointer; color: var(--ink-soft); }
+.desk-settings-form { display: flex; flex-direction: column; gap: 1rem; }
+.desk-settings-form label { display: flex; flex-direction: column; gap: .35rem; font-weight: 650; font-size: .88rem; }
+.desk-settings-form input[type="number"], .desk-settings-form select { padding: .55rem .65rem; border-radius: 10px; border: 1px solid var(--line,#e3e1d8); }
+.desk-toggle-row { flex-direction: row !important; align-items: center; justify-content: space-between; gap: 1rem; }
+.desk-toggle-row span { display: flex; flex-direction: column; }
+.desk-toggle-row small { color: var(--ink-soft); font-weight: 500; font-size: .78rem; }
+.desk-toggle-row input[type="checkbox"] { width: 42px; height: 24px; }
+.desk-drawer-actions { display: flex; justify-content: flex-end; gap: .6rem; margin-top: .6rem; }
+
+/* Toast reuse — subtle inline status under console */
+.desk-run-status { font-size: .82rem; color: var(--ink-soft); }
+.desk-run-status.error { color: #b9552f; }

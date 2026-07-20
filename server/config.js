@@ -81,6 +81,13 @@ export const config = {
     driftThresholdPct: number(process.env.AGENT_DRIFT_THRESHOLD_PCT, 5),
     largeExpenseThreshold: number(process.env.AGENT_LARGE_EXPENSE_THRESHOLD, 1000)
   },
+  tradingDesk: {
+    // Premium agentic trading feature. Per-household enablement lives in the
+    // trading_desk_settings table (admin toggle); this flag only controls
+    // whether the nightly scheduler is allowed to auto-run it at all.
+    schedulerEnabled: bool(process.env.TRADING_DESK_SCHEDULER_ENABLED, true),
+    maxLiveSymbols: int(process.env.TRADING_DESK_MAX_LIVE_SYMBOLS, 24)
+  },
   plaid: {
     enabled: bool(process.env.PLAID_ENABLED, false),
     aggregationMode: process.env.ACCOUNT_AGGREGATION_MODE || 'manual',

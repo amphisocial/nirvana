@@ -50,7 +50,7 @@
 
 
   function showHoldingsTab(name, options = {}) {
-    const selected = ['insights', 'manage', 'research'].includes(name) ? name : 'insights';
+    const selected = ['insights', 'manage', 'research', 'desk'].includes(name) ? name : 'insights';
     activeTab = selected;
 
     $$('[data-holdings-tab]').forEach((button) => {
@@ -73,8 +73,10 @@
         if (options.scroll !== false) {
           $('#portfolioAccountSelect')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
-      } else {
+      } else if (selected === 'research') {
         document.dispatchEvent(new CustomEvent('nirvana:load-holding-research'));
+      } else if (selected === 'desk') {
+        document.dispatchEvent(new CustomEvent('nirvana:open-trading-desk'));
       }
     }, 70);
   }
@@ -450,7 +452,7 @@
       button.addEventListener('keydown', (event) => {
         if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
         event.preventDefault();
-        const order = ['insights', 'manage', 'research'];
+        const order = ['insights', 'manage', 'research', 'desk'];
         const currentIndex = order.indexOf(button.dataset.holdingsTab);
         const direction = event.key === 'ArrowRight' ? 1 : -1;
         const next = order[(currentIndex + direction + order.length) % order.length];

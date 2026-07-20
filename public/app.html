@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/what-if.css?v=0.6.0">
   <link rel="stylesheet" href="/holdings.css?v=0.7.1">
   <link rel="stylesheet" href="/intelligence.css?v=0.8.1">
+  <link rel="stylesheet" href="/trading-desk.css?v=1.0.0">
   <link rel="stylesheet" href="/real-estate.css?v=0.9.0">
 </head>
 <body class="app-body">
@@ -416,6 +417,7 @@
         <button class="holdings-tab active" type="button" role="tab" aria-selected="true" data-holdings-tab="insights">Portfolio Intelligence &amp; What-If</button>
         <button class="holdings-tab" type="button" role="tab" aria-selected="false" data-holdings-tab="manage">Manage Holdings</button>
         <button class="holdings-tab" type="button" role="tab" aria-selected="false" data-holdings-tab="research">Research &amp; Earnings</button>
+        <button class="holdings-tab holdings-tab-desk" type="button" role="tab" aria-selected="false" data-holdings-tab="desk">Trading Desk<span class="desk-tab-badge" id="deskInboxTabBadge" hidden>0</span></button>
       </div>
 
       <div class="holdings-tab-panel active" data-holdings-panel="insights">
@@ -566,6 +568,125 @@
           <div class="research-filter-row"><label>Filter holdings<input id="holdingResearchSearch" type="search" placeholder="Symbol or company"></label><label>Street view<select id="holdingResearchRating"><option value="">All ratings</option><option>Strong Buy</option><option>Buy</option><option>Hold</option><option>Sell</option><option>Strong Sell</option><option>Unrated</option></select></label><span id="holdingResearchStatus" class="status-pill neutral">Open this tab to load research</span></div>
           <div class="table-wrap research-holdings-table"><table><thead><tr><th>Holding</th><th>Current value</th><th>Street target</th><th>Consensus</th><th>Latest earnings agent summary</th><th>Upcoming</th><th>Refreshed</th></tr></thead><tbody id="holdingResearchRows"></tbody></table></div>
         </article>
+      </div>
+
+      <!-- ============================ TRADING DESK ============================ -->
+      <div class="holdings-tab-panel" data-holdings-panel="desk">
+        <div id="deskGate" class="desk-gate" hidden>
+          <div class="desk-gate-card">
+            <span class="panel-kicker">PREMIUM · AGENTIC TRADING DESK</span>
+            <h2>Turn your holdings into a reviewed decision queue</h2>
+            <p>The Trading Desk agent scans your holdings and watchlist around the clock, drafts buy, sell, trim, and fresh-idea proposals with entry, target, stop, and risk checks — then routes each one to an AI Inbox where you make the final call. Nothing is ever traded automatically.</p>
+            <div id="deskGateAdmin" class="desk-gate-admin" hidden>
+              <button id="deskEnableButton" class="button button-primary" type="button">Turn on Trading Desk</button>
+              <span class="desk-gate-note">You're the household owner, so you can enable it for everyone.</span>
+            </div>
+            <div id="deskGateMember" class="desk-gate-member" hidden>
+              <span class="status-pill neutral">Ask the household owner to switch this feature on.</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="deskWorkspace" class="desk-workspace" hidden>
+          <!-- Console: run the agent + settings -->
+          <article class="panel desk-console">
+            <div class="panel-head">
+              <div><span class="panel-kicker">AGENT CONSOLE</span><h2>Run the workflow</h2></div>
+              <div class="inline-actions">
+                <span id="deskProviderPill" class="status-pill neutral">—</span>
+                <button id="deskSettingsButton" class="button button-secondary" type="button" title="Trading Desk settings">⚙ Settings</button>
+                <button id="deskRunButton" class="button button-primary" type="button">▶ Run agent</button>
+              </div>
+            </div>
+            <div class="desk-pipeline" id="deskPipeline" aria-live="polite">
+              <div class="desk-stage" data-stage="scan"><span class="desk-stage-dot"></span><span class="desk-stage-name">Scan</span></div>
+              <div class="desk-stage" data-stage="signals"><span class="desk-stage-dot"></span><span class="desk-stage-name">Signals</span></div>
+              <div class="desk-stage" data-stage="plan"><span class="desk-stage-dot"></span><span class="desk-stage-name">Plan</span></div>
+              <div class="desk-stage" data-stage="risk"><span class="desk-stage-dot"></span><span class="desk-stage-name">Risk</span></div>
+              <div class="desk-stage" data-stage="decision"><span class="desk-stage-dot"></span><span class="desk-stage-name">Decision</span></div>
+            </div>
+            <p id="deskRunNote" class="chart-note">Runs use your saved holdings and watchlist. Results appear in the AI Inbox below for review.</p>
+          </article>
+
+          <div class="desk-columns">
+            <!-- Watchlist -->
+            <article class="panel desk-watchlist">
+              <div class="panel-head"><div><span class="panel-kicker">CANDIDATES</span><h2>Watchlist</h2></div></div>
+              <p class="chart-note">Symbols you're considering adding. The agent evaluates these as potential new positions.</p>
+              <form id="deskWatchlistForm" class="desk-watchlist-form">
+                <input id="deskWatchSymbol" type="text" maxlength="12" placeholder="Ticker (e.g. NVDA)" aria-label="Ticker" required>
+                <input id="deskWatchThesis" type="text" maxlength="120" placeholder="Why you're watching it (optional)" aria-label="Thesis">
+                <button class="button button-secondary" type="submit">Add</button>
+              </form>
+              <ul id="deskWatchlist" class="desk-watchlist-items"></ul>
+            </article>
+
+            <!-- Inbox filters + summary -->
+            <article class="panel desk-inbox-summary">
+              <div class="panel-head"><div><span class="panel-kicker">AI INBOX</span><h2>Recommendations to review</h2></div></div>
+              <div class="desk-inbox-filters" role="tablist" aria-label="Inbox filter">
+                <button class="desk-filter active" type="button" data-inbox-filter="pending" role="tab" aria-selected="true">Pending <span class="desk-count" data-count="pending">0</span></button>
+                <button class="desk-filter" type="button" data-inbox-filter="approved" role="tab" aria-selected="false">Approved <span class="desk-count" data-count="approved">0</span></button>
+                <button class="desk-filter" type="button" data-inbox-filter="watchlisted" role="tab" aria-selected="false">Watching <span class="desk-count" data-count="watchlisted">0</span></button>
+                <button class="desk-filter" type="button" data-inbox-filter="rejected" role="tab" aria-selected="false">Rejected <span class="desk-count" data-count="rejected">0</span></button>
+              </div>
+              <div class="desk-bulk" id="deskBulkBar" hidden>
+                <span id="deskBulkCount">0 selected</span>
+                <div class="inline-actions">
+                  <button class="button button-secondary desk-bulk-approve" type="button">Approve</button>
+                  <button class="button button-secondary desk-bulk-watch" type="button">Watch</button>
+                  <button class="button button-secondary desk-bulk-reject" type="button">Reject</button>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <!-- Inbox list -->
+          <div id="deskInbox" class="desk-inbox"></div>
+          <div id="deskInboxEmpty" class="desk-empty" hidden></div>
+        </div>
+
+        <!-- Settings drawer -->
+        <div id="deskSettingsDrawer" class="desk-drawer" hidden>
+          <div class="desk-drawer-backdrop" data-desk-close></div>
+          <div class="desk-drawer-body" role="dialog" aria-modal="true" aria-label="Trading Desk settings">
+            <div class="desk-drawer-head">
+              <h3>Trading Desk settings</h3>
+              <button class="desk-drawer-close" type="button" data-desk-close aria-label="Close">✕</button>
+            </div>
+            <form id="deskSettingsForm" class="desk-settings-form">
+              <label class="desk-toggle-row">
+                <span><strong>Feature enabled</strong><small>Owner-only. Turns the agent on for the whole household.</small></span>
+                <input type="checkbox" name="enabled" id="deskSettingEnabled">
+              </label>
+              <label>Risk profile
+                <select name="riskProfile" id="deskSettingRisk">
+                  <option value="conservative">Conservative</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="aggressive">Aggressive</option>
+                </select>
+              </label>
+              <label>Max weight per position (%)
+                <input type="number" name="maxPositionPct" id="deskSettingMaxPos" min="1" max="50" step="0.5">
+              </label>
+              <label>New ideas per run
+                <input type="number" name="maxNewIdeas" id="deskSettingMaxIdeas" min="0" max="10" step="1">
+              </label>
+              <label>Cash reserve target (%)
+                <input type="number" name="cashReservePct" id="deskSettingCash" min="0" max="50" step="0.5">
+              </label>
+              <label class="desk-toggle-row">
+                <span><strong>Include in nightly auto-run</strong><small>Let the scheduler refresh recommendations overnight.</small></span>
+                <input type="checkbox" name="autoRunEnabled" id="deskSettingAutoRun">
+              </label>
+              <p class="mini-disclaimer" id="deskSettingsDisclaimer"></p>
+              <div class="desk-drawer-actions">
+                <button class="button button-secondary" type="button" data-desk-close>Cancel</button>
+                <button class="button button-primary" type="submit">Save settings</button>
+              </div>
+            </form>
+          </div>
+        </div>
       </div>
 
     </section>
@@ -759,5 +880,6 @@
   <script src="/holdings-ui.js?v=0.8.0" defer></script>
   <script src="/intelligence-ui.js?v=0.9.1" defer></script>
   <script src="/real-estate-ui.js?v=0.9.0" defer></script>
+  <script src="/trading-desk-ui.js?v=1.0.0" defer></script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 import { pool } from '../db.js';
 import { config } from '../config.js';
 import { claimAgentRun, runNightlyAgent, runWeeklyAgent } from './agent-financial-center.js';
+import { runScheduledTradingDeskForAll } from './trading-desk-service.js';
 
 const HOUR_MS = 60 * 60 * 1000;
 let timer = null;
@@ -53,6 +54,19 @@ export async function tickAgentScheduler(now = new Date()) {
         if (weeklyDue) await runClaimed(household.id, 'weekly', weeklyPeriodKey);
       } catch (error) {
         console.error(`Agent scheduler failed for household ${household.id}:`, error);
+      }
+    }
+
+    // Trading Desk nightly pass — only households with the premium feature and
+    // auto-run both enabled. Deduped per household per day inside the service.
+    if (nightlyDue && config.tradingDesk.schedulerEnabled) {
+      try {
+        const outcome = await runScheduledTradingDeskForAll(local.dateKey);
+        if (outcome.completed) {
+          console.log(`Trading Desk nightly pass: ${outcome.completed}/${outcome.eligible} household(s) refreshed.`);
+        }
+      } catch (error) {
+        console.error('Trading Desk nightly pass failed:', error);
       }
     }
   } finally {

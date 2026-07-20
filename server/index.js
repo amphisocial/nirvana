@@ -25,6 +25,7 @@ import { goalsRouter } from './routes/goals.js';
 import { householdSharingRouter } from './routes/household-sharing.js';
 import { chatRouter } from './routes/chat.js';
 import { settingsRouter } from './routes/settings.js';
+import { tradingDeskRouter } from './routes/trading-desk.js';
 import { stripeRouter, stripeWebhookHandler } from './routes/stripe.js';
 import { startAgentScheduler } from './services/agent-scheduler.js';
 
@@ -86,7 +87,7 @@ app.get('/api/health', async (_req, res) => {
     service: 'nirvana',
     status: database === 'ok' ? 'ok' : 'degraded',
     database,
-    version: '0.9.0',
+    version: '1.0.0',
     agentScheduler: config.agent.schedulerEnabled ? 'enabled' : 'disabled'
   });
 });
@@ -120,6 +121,7 @@ app.use('/api/goals', requireAuth, householdContext, goalsRouter);
 app.use('/api/household', requireAuth, householdContext, householdSharingRouter);
 app.use('/api/chat', aiLimiter, requireAuth, householdContext, chatRouter);
 app.use('/api/settings', requireAuth, householdContext, settingsRouter);
+app.use('/api/trading-desk', aiLimiter, requireAuth, householdContext, tradingDeskRouter);
 app.use('/api/stripe', requireAuth, householdContext, stripeRouter);
 
 app.use(express.static(publicDir, {
