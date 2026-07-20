@@ -64,7 +64,13 @@ export const config = {
   },
   market: {
     provider: (process.env.MARKET_DATA_PROVIDER || 'mock').toLowerCase(),
+    // Optional automatic failover: when the primary provider hits a rate limit
+    // (or errors) and a different provider is named here, live calls retry with
+    // it before falling back to stale cache. e.g. primary=alphavantage,
+    // fallback=finnhub. Leave empty to disable.
+    fallbackProvider: (process.env.MARKET_DATA_FALLBACK_PROVIDER || '').toLowerCase(),
     alphaVantageApiKey: process.env.ALPHAVANTAGE_API_KEY,
+    finnhubApiKey: process.env.FINNHUB_API_KEY,
     cacheMinutes: int(process.env.MARKET_CACHE_MINUTES, 30),
     researchCacheMinutes: int(process.env.MARKET_RESEARCH_CACHE_MINUTES, 720),
     newsCacheMinutes: int(process.env.MARKET_NEWS_CACHE_MINUTES, 30),

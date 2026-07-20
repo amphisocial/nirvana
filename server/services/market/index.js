@@ -7,6 +7,12 @@ import {
   getAlphaVantageResearch,
   getAlphaVantageNews
 } from './alphavantage.js';
+import {
+  getFinnhubHistory,
+  getFinnhubQuote,
+  getFinnhubResearch,
+  getFinnhubNews
+} from './finnhub.js';
 import { calculateMarketAnalytics, calculateQuantDiagnostics, sliceHistoryForRange } from './analytics.js';
 
 const providers = {
@@ -16,16 +22,55 @@ const providers = {
     quote: getAlphaVantageQuote,
     research: getAlphaVantageResearch,
     news: getAlphaVantageNews
+  },
+  finnhub: {
+    history: getFinnhubHistory,
+    quote: getFinnhubQuote,
+    research: getFinnhubResearch,
+    news: getFinnhubNews
   }
 };
 
-function provider() {
-  const selected = providers[config.market.provider];
-  if (!selected) throw new Error(`Unsupported MARKET_DATA_PROVIDER: ${config.market.provider}`);
+function provider(name = config.market.provider) {
+  const selected = providers[name];
+  if (!selected) throw new Error(`Unsupported MARKET_DATA_PROVIDER: ${name}`);
   return selected;
 }
 
-async function cachedCall(key, callback, ttl) {
+// The fallback provider is used only if it's configured, different from the
+// primary, and actually registered.
+function fallbackProviderName() {
+  const name = config.market.fallbackProvider;
+  if (!name || name === config.market.provider || !providers[name]) return null;
+  return name;
+}
+
+// Runs `method` on the primary provider; on failure, retries on the fallback
+// provider (if any) before the caller falls back to stale cache. `method` is
+// the provider function name (history/quote/research/news); `args` are passed
+// through. Returns { value, providerUsed }.
+async function callWithFallback(method, args) {
+  try {
+    const value = await provider()[method](...args);
+    return { value, providerUsed: config.market.provider };
+  } catch (primaryError) {
+    const fallback = fallbackProviderName();
+    if (!fallback) throw primaryError;
+    try {
+      console.warn(`Market ${method} via ${config.market.provider} failed (${primaryError.message}); retrying with ${fallback}.`);
+      const value = await provider(fallback)[method](...args);
+      return { value, providerUsed: fallback };
+    } catch (fallbackError) {
+      // Surface the original error but note the fallback also failed.
+      const err = new Error(`${primaryError.message} (fallback ${fallback}: ${fallbackError.message})`);
+      err.primary = primaryError;
+      err.fallback = fallbackError;
+      throw err;
+    }
+  }
+}
+
+async function cachedCall(key, method, args, ttl) {
   try {
     const cached = await getCached(key);
     if (cached) return cached;
@@ -34,10 +79,13 @@ async function cachedCall(key, callback, ttl) {
   }
 
   try {
-    const value = await callback();
-    try { await setCached(key, value, ttl); }
+    const { value, providerUsed } = await callWithFallback(method, args);
+    const enriched = providerUsed !== config.market.provider
+      ? { ...value, providerUsed }
+      : value;
+    try { await setCached(key, enriched, ttl); }
     catch (error) { console.warn('Market cache write failed:', error.message); }
-    return value;
+    return enriched;
   } catch (liveError) {
     try {
       const stale = await getCachedStale(key);
@@ -56,7 +104,8 @@ export function getHistory(symbol, range = '3m') {
   const normalized = symbol.toUpperCase();
   return cachedCall(
     `history:${config.market.provider}:${normalized}:${range}`,
-    () => provider().history(normalized, range),
+    'history',
+    [normalized, range],
     config.market.cacheMinutes
   );
 }
@@ -65,7 +114,8 @@ export function getQuote(symbol) {
   const normalized = symbol.toUpperCase();
   return cachedCall(
     `quote:${config.market.provider}:${normalized}`,
-    () => provider().quote(normalized),
+    'quote',
+    [normalized],
     Math.min(config.market.cacheMinutes, 15)
   );
 }
@@ -74,7 +124,8 @@ export function getResearch(symbol) {
   const normalized = symbol.toUpperCase();
   return cachedCall(
     `research:${config.market.provider}:${normalized}`,
-    () => provider().research(normalized),
+    'research',
+    [normalized],
     config.market.researchCacheMinutes
   );
 }
@@ -83,7 +134,8 @@ export function getNews(symbol) {
   const normalized = symbol.toUpperCase();
   return cachedCall(
     `news:${config.market.provider}:${normalized}`,
-    () => provider().news(normalized),
+    'news',
+    [normalized],
     config.market.newsCacheMinutes
   );
 }

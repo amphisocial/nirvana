@@ -4,6 +4,17 @@
    a desk ticket with an action rail down the left edge.
    ===================================================================== */
 
+/* The [hidden] attribute must win over any explicit `display` below.
+   Several desk blocks (gate, workspace, drawer) set display:grid/flex/block,
+   which would otherwise override the browser default `[hidden]{display:none}`
+   and leave the element (e.g. the Settings drawer) stuck on screen. */
+.desk-gate[hidden],
+.desk-workspace[hidden],
+.desk-drawer[hidden],
+.desk-bulk[hidden],
+.desk-empty[hidden],
+[data-holdings-panel="desk"] [hidden] { display: none !important; }
+
 /* ---- Feature gate (feature off) ---- */
 .desk-gate { display: grid; place-items: center; padding: 2rem 0; }
 .desk-gate-card {

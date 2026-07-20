@@ -87,7 +87,7 @@ app.get('/api/health', async (_req, res) => {
     service: 'nirvana',
     status: database === 'ok' ? 'ok' : 'degraded',
     database,
-    version: '1.0.0',
+    version: '1.0.1',
     agentScheduler: config.agent.schedulerEnabled ? 'enabled' : 'disabled'
   });
 });
@@ -121,7 +121,10 @@ app.use('/api/goals', requireAuth, householdContext, goalsRouter);
 app.use('/api/household', requireAuth, householdContext, householdSharingRouter);
 app.use('/api/chat', aiLimiter, requireAuth, householdContext, chatRouter);
 app.use('/api/settings', requireAuth, householdContext, settingsRouter);
-app.use('/api/trading-desk', aiLimiter, requireAuth, householdContext, tradingDeskRouter);
+// Note: the AI rate limiter is applied only to the agent-run endpoint inside
+// the router (see routes/trading-desk.js), so browsing settings, watchlist,
+// and the inbox is never blocked by AI limits.
+app.use('/api/trading-desk', requireAuth, householdContext, tradingDeskRouter);
 app.use('/api/stripe', requireAuth, householdContext, stripeRouter);
 
 app.use(express.static(publicDir, {

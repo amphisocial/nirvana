@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { rateLimit } from 'express-rate-limit';
 import { z } from 'zod';
 import { pool, withTransaction } from '../db.js';
 import { config } from '../config.js';
@@ -7,6 +8,17 @@ import {
   executeTradingRun,
   DEFAULT_TRADING_SETTINGS
 } from '../services/trading-desk-service.js';
+
+// Rate-limit ONLY the AI-heavy agent run, not settings/watchlist/inbox reads.
+// This prevents the "AI request limit reached" banner from blocking a user who
+// just wants to open settings or enable the feature.
+const runLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 6,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'The agent is busy — please wait a moment before running it again.' }
+});
 
 export const tradingDeskRouter = Router();
 
@@ -203,7 +215,7 @@ const runSchema = z.object({
   })).max(10).optional().default([])
 });
 
-tradingDeskRouter.post('/run', requireFeatureEnabled, async (req, res, next) => {
+tradingDeskRouter.post('/run', runLimiter, requireFeatureEnabled, async (req, res, next) => {
   try {
     const value = runSchema.parse(req.body || {});
     const settings = req.tradingSettings;
