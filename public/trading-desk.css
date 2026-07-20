@@ -210,3 +210,108 @@
 /* Toast reuse — subtle inline status under console */
 .desk-run-status { font-size: .82rem; color: var(--ink-soft); }
 .desk-run-status.error { color: #b9552f; }
+
+/* =====================================================================
+   1.1.0 — scoped runs + per-symbol charts
+   ===================================================================== */
+
+/* Scoped-run row in the console */
+.desk-scoped-run {
+  display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+  margin: .9rem 0 .2rem; padding-top: .9rem; border-top: 1px dashed var(--line, #e3e1d8);
+}
+.desk-scoped-label { font-size: .85rem; font-weight: 650; color: var(--ink-soft); }
+.desk-scoped-run input {
+  flex: 1; min-width: 200px; padding: .5rem .7rem;
+  border: 1px solid var(--line, #e3e1d8); border-radius: 10px; font-size: .9rem;
+}
+.desk-scoped-run input:focus { outline: none; border-color: var(--accent); }
+
+/* Clickable symbol + quick actions on memo cards */
+.memo-symbol-link {
+  background: none; border: none; padding: 0; cursor: pointer;
+  font-size: 1.15rem; font-weight: 850; letter-spacing: .01em; color: var(--ink);
+  display: inline-flex; align-items: center; gap: .35rem;
+}
+.memo-symbol-link:hover { color: var(--accent-dark); text-decoration: underline; text-underline-offset: 3px; }
+.memo-symbol-chart { font-size: .8rem; opacity: .6; }
+.memo-symbol-link:hover .memo-symbol-chart { opacity: 1; }
+
+.memo-quick-actions { display: flex; gap: 1rem; margin: .5rem 0 .2rem; flex-wrap: wrap; }
+.memo-link-btn {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--accent-dark); font-weight: 700; font-size: .82rem;
+}
+.memo-link-btn:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+/* Chart drawer — wider than the settings drawer */
+.desk-chart-drawer .desk-chart-body {
+  position: absolute; top: 0; right: 0; bottom: 0; width: min(720px, 96vw);
+  background: var(--paper, #faf8f2); padding: 1.5rem 1.6rem; overflow-y: auto;
+  box-shadow: -30px 0 60px -40px rgba(0,0,0,.5); animation: deskSlide .22s ease;
+}
+@media (prefers-reduced-motion: reduce) { .desk-chart-drawer .desk-chart-body { animation: none; } }
+.desk-chart-content { display: flex; flex-direction: column; gap: 1.4rem; }
+.desk-chart-loading { padding: 2rem 0; text-align: center; color: var(--ink-soft); }
+.desk-chart-loading.error { color: #b9552f; }
+
+.chart-section { }
+.chart-section-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: .5rem; }
+.chart-section-title { font-weight: 800; font-size: .95rem; color: var(--ink); }
+.chart-source { font-size: .72rem; color: var(--ink-soft); }
+
+/* SVG price chart */
+.price-chart { width: 100%; height: auto; display: block; background: var(--surface, #fff); border: 1px solid var(--line, #e3e1d8); border-radius: 12px; }
+.price-chart .grid { stroke: var(--line, #ececE4); stroke-width: 1; stroke-dasharray: 2 4; }
+.price-chart .axis-y { fill: var(--ink-soft); font-size: 10px; text-anchor: end; }
+.price-chart .axis-x { fill: var(--ink-soft); font-size: 10px; }
+.price-chart .price-line { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; }
+.price-chart .price-area { fill: color-mix(in srgb, var(--accent) 12%, transparent); stroke: none; }
+.price-chart .entry-band { fill: color-mix(in srgb, var(--accent) 14%, transparent); }
+.price-chart .lvl { stroke-width: 1.4; stroke-dasharray: 5 4; }
+.price-chart .lvl.target { stroke: #2f7d55; }
+.price-chart .lvl.stop { stroke: #b9552f; }
+.price-chart .lvl.ref { stroke: var(--ink-soft); stroke-dasharray: 2 3; }
+.price-chart .lvl-label { font-size: 10px; font-weight: 800; }
+.price-chart .lvl-label.target { fill: #2f7d55; }
+.price-chart .lvl-label.stop { fill: #b9552f; }
+.price-chart .lvl-label.ref { fill: var(--ink-soft); }
+
+.chart-legend { display: flex; gap: 1rem; margin-top: .5rem; flex-wrap: wrap; }
+.chart-legend .lg { font-size: .76rem; color: var(--ink-soft); display: inline-flex; align-items: center; gap: .35rem; }
+.chart-legend .lg::before { content: ""; width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.chart-legend .lg-price::before { background: var(--ink); }
+.chart-legend .lg-entry::before { background: color-mix(in srgb, var(--accent) 45%, transparent); height: 10px; }
+.chart-legend .lg-target::before { background: #2f7d55; }
+.chart-legend .lg-stop::before { background: #b9552f; }
+
+/* Signal strength bars */
+.signal-bars { display: flex; flex-direction: column; gap: .5rem; }
+.signal-row { display: grid; grid-template-columns: 130px 1fr 130px; gap: .6rem; align-items: center; }
+.signal-name { font-size: .82rem; font-weight: 650; }
+.signal-track { height: 8px; border-radius: 5px; background: var(--surface-soft, #eceae2); overflow: hidden; }
+.signal-fill { display: block; height: 100%; border-radius: 5px; }
+.signal-fill.bull { background: #3f9169; }
+.signal-fill.bear { background: #c26a45; }
+.signal-fill.neutral { background: #9aa29a; }
+.signal-detail { font-size: .76rem; color: var(--ink-soft); text-align: right; }
+@media (max-width: 560px) { .signal-row { grid-template-columns: 1fr; gap: .2rem; } .signal-detail { text-align: left; } }
+
+/* Stat grid */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .6rem; }
+.stat-cell { background: var(--surface, #fff); border: 1px solid var(--line, #e3e1d8); border-radius: 10px; padding: .6rem .7rem; }
+.stat-cell span { display: block; font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-soft); }
+.stat-cell strong { font-size: 1rem; font-variant-numeric: tabular-nums; }
+
+/* Plan table */
+.plan-table { width: 100%; border-collapse: collapse; }
+.plan-table th, .plan-table td { text-align: left; padding: .5rem .2rem; border-bottom: 1px solid var(--line, #eee); font-size: .88rem; }
+.plan-table th { color: var(--ink-soft); font-weight: 600; width: 42%; }
+.plan-table td { font-weight: 700; font-variant-numeric: tabular-nums; }
+.plan-table tr.target td { color: #2f7d55; }
+.plan-table tr.stop td { color: #b9552f; }
+.plan-table tr.muted td { font-weight: 500; color: var(--ink-soft); }
+
+.chart-thesis { margin: 0; line-height: 1.55; color: var(--ink); }
+.chart-gaps { font-size: .8rem; color: var(--ink-soft); margin: .4rem 0 0; }
+.chart-actions { display: flex; gap: .6rem; flex-wrap: wrap; padding-top: .4rem; border-top: 1px solid var(--line, #eee); align-items: center; }

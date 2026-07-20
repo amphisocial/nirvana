@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="/what-if.css?v=0.6.0">
   <link rel="stylesheet" href="/holdings.css?v=0.7.1">
   <link rel="stylesheet" href="/intelligence.css?v=0.8.1">
-  <link rel="stylesheet" href="/trading-desk.css?v=1.0.1">
+  <link rel="stylesheet" href="/trading-desk.css?v=1.1.0">
   <link rel="stylesheet" href="/real-estate.css?v=0.9.0">
 </head>
 <body class="app-body">
@@ -595,9 +595,14 @@
               <div class="inline-actions">
                 <span id="deskProviderPill" class="status-pill neutral">—</span>
                 <button id="deskSettingsButton" class="button button-secondary" type="button" title="Trading Desk settings">⚙ Settings</button>
-                <button id="deskRunButton" class="button button-primary" type="button">▶ Run agent</button>
+                <button id="deskRunButton" class="button button-primary" type="button">▶ Run all</button>
               </div>
             </div>
+            <form id="deskScopedRunForm" class="desk-scoped-run">
+              <label for="deskScopedSymbols" class="desk-scoped-label">Or analyze specific symbols:</label>
+              <input id="deskScopedSymbols" type="text" placeholder="e.g. AAPL, NVDA, LULU" aria-label="Symbols to analyze">
+              <button id="deskScopedRunButton" class="button button-secondary" type="submit">▶ Run these</button>
+            </form>
             <div class="desk-pipeline" id="deskPipeline" aria-live="polite">
               <div class="desk-stage" data-stage="scan"><span class="desk-stage-dot"></span><span class="desk-stage-name">Scan</span></div>
               <div class="desk-stage" data-stage="signals"><span class="desk-stage-dot"></span><span class="desk-stage-name">Signals</span></div>
@@ -605,7 +610,7 @@
               <div class="desk-stage" data-stage="risk"><span class="desk-stage-dot"></span><span class="desk-stage-name">Risk</span></div>
               <div class="desk-stage" data-stage="decision"><span class="desk-stage-dot"></span><span class="desk-stage-name">Decision</span></div>
             </div>
-            <p id="deskRunNote" class="chart-note">Runs use your saved holdings and watchlist. Results appear in the AI Inbox below for review.</p>
+            <p id="deskRunNote" class="chart-note">Run all evaluates your holdings and watchlist. Or enter symbols above to analyze just those. Results appear in the AI Inbox below.</p>
           </article>
 
           <div class="desk-columns">
@@ -644,6 +649,23 @@
           <!-- Inbox list -->
           <div id="deskInbox" class="desk-inbox"></div>
           <div id="deskInboxEmpty" class="desk-empty" hidden></div>
+        </div>
+
+        <!-- Per-symbol chart / detail drawer -->
+        <div id="deskChartDrawer" class="desk-drawer desk-chart-drawer" hidden>
+          <div class="desk-drawer-backdrop" data-chart-close></div>
+          <div class="desk-chart-body" role="dialog" aria-modal="true" aria-label="Symbol analysis">
+            <div class="desk-drawer-head">
+              <div>
+                <span class="panel-kicker" id="deskChartKicker">TRADE PLAN</span>
+                <h3 id="deskChartTitle">—</h3>
+              </div>
+              <button class="desk-drawer-close" type="button" data-chart-close aria-label="Close">✕</button>
+            </div>
+            <div id="deskChartContent" class="desk-chart-content">
+              <div class="desk-chart-loading">Loading analysis…</div>
+            </div>
+          </div>
         </div>
 
         <!-- Settings drawer -->
@@ -880,6 +902,6 @@
   <script src="/holdings-ui.js?v=0.8.0" defer></script>
   <script src="/intelligence-ui.js?v=0.9.1" defer></script>
   <script src="/real-estate-ui.js?v=0.9.0" defer></script>
-  <script src="/trading-desk-ui.js?v=1.0.1" defer></script>
+  <script src="/trading-desk-ui.js?v=1.1.0" defer></script>
 </body>
 </html>

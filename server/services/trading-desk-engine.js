@@ -74,6 +74,7 @@ export async function scanSymbols(symbols, { maxLiveSymbols = 24 } = {}) {
         sector: bundle.research?.sector || null,
         analytics: bundle.analytics,
         quant: bundle.quant,
+        chartHistory: downsampleHistory(bundle.chartHistory || bundle.history),
         dataGaps: bundle.dataGaps || [],
         agentStatus: bundle.liveDataAvailable ? 'scanned' : 'fallback'
       }];
@@ -82,6 +83,27 @@ export async function scanSymbols(symbols, { maxLiveSymbols = 24 } = {}) {
     }
   });
   return Object.fromEntries(rows);
+}
+
+// Reduce a price series to at most ~120 points to keep the stored snapshot small
+// while preserving the visible shape for the chart.
+function downsampleHistory(history) {
+  const points = history?.points;
+  if (!Array.isArray(points) || !points.length) return [];
+  const max = 120;
+  if (points.length <= max) {
+    return points.map((p) => ({ date: p.date, close: round(p.close, 4) }));
+  }
+  const step = points.length / max;
+  const out = [];
+  for (let i = 0; i < max; i += 1) {
+    const p = points[Math.floor(i * step)];
+    if (p) out.push({ date: p.date, close: round(p.close, 4) });
+  }
+  // Always include the final point so the latest price is exact.
+  const last = points.at(-1);
+  if (last && out.at(-1)?.date !== last.date) out.push({ date: last.date, close: round(last.close, 4) });
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -406,6 +428,18 @@ export async function runTradingWorkflow({
     signals: c.signalSummary?.signals ?? [],
     riskChecks: c.riskChecks ?? [],
     dataGaps: [...(c.packet?.dataGaps ?? []), ...(c.watchFor ?? [])].slice(0, 4),
+    priceHistory: c.packet?.chartHistory ?? [],
+    analyticsSnapshot: {
+      annualizedVolatilityPct: c.packet?.analytics?.annualizedVolatilityPct ?? null,
+      maximumDrawdownPct: c.packet?.analytics?.maximumDrawdownPct ?? null,
+      returnsPct: c.packet?.analytics?.returnsPct ?? null,
+      fiftyTwoWeekHigh: c.packet?.analytics?.fiftyTwoWeekHigh ?? c.packet?.research?.fiftyTwoWeekHigh ?? null,
+      fiftyTwoWeekLow: c.packet?.analytics?.fiftyTwoWeekLow ?? c.packet?.research?.fiftyTwoWeekLow ?? null,
+      beta: c.packet?.quant?.estimatedBetaToBenchmark ?? null,
+      momentumState: c.packet?.quant?.momentumState ?? null,
+      trendState: c.packet?.quant?.trendState ?? null,
+      priceAsOf: c.packet?.priceAsOf ?? null
+    },
     aiGenerated: c.aiGenerated ?? false
   }));
 

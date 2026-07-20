@@ -128,9 +128,11 @@
     $$('.desk-stage').forEach((el) => { el.classList.remove('is-active'); el.classList.add('is-done'); });
   }
 
-  async function runAgent() {
-    const button = $('#deskRunButton');
-    button.disabled = true;
+  async function runAgent(options = {}) {
+    const { scope = 'all', symbols = [], sourceButton = null } = options;
+    const button = sourceButton || $('#deskRunButton');
+    const allButtons = [$('#deskRunButton'), $('#deskScopedRunButton')].filter(Boolean);
+    allButtons.forEach((b) => { b.disabled = true; });
     const note = $('#deskRunNote');
     note.classList.remove('error');
     resetPipeline();
@@ -143,10 +145,12 @@
     }, 700);
 
     try {
-      note.textContent = 'Agent running — scanning holdings and watchlist…';
+      note.textContent = scope === 'symbols'
+        ? `Agent running — analyzing ${symbols.join(', ')}…`
+        : 'Agent running — scanning holdings and watchlist…';
       const result = await api('/api/trading-desk/run', {
         method: 'POST',
-        body: JSON.stringify({ maxLiveSymbols: 24 })
+        body: JSON.stringify({ maxLiveSymbols: 24, scope, symbols })
       });
       window.clearInterval(anim);
       completePipeline();
@@ -159,11 +163,13 @@
       resetPipeline();
       note.classList.add('error');
       note.textContent = error.message || 'The agent run could not be completed.';
-      if (error.message && /empty/i.test(error.message)) {
-        note.textContent = 'Add at least one holding or watchlist symbol before running the agent.';
+      if (error.message && /empty|None of the requested/i.test(error.message)) {
+        note.textContent = scope === 'symbols'
+          ? 'None of those symbols could be evaluated. Check the tickers and try again.'
+          : 'Add at least one holding or watchlist symbol before running the agent.';
       }
     } finally {
-      button.disabled = false;
+      allButtons.forEach((b) => { b.disabled = false; });
     }
   }
 
@@ -248,15 +254,16 @@
 
   function memoCard(rec) {
     const selectable = rec.review_status === 'pending';
+    const hasChart = (rec.chart_points ?? 0) > 0 || rec.reference_price != null;
     return `
-    <div class="desk-memo" data-action="${esc(rec.action)}" data-reviewstatus="${esc(rec.review_status)}" data-id="${rec.id}">
+    <div class="desk-memo" data-action="${esc(rec.action)}" data-reviewstatus="${esc(rec.review_status)}" data-id="${rec.id}" data-symbol="${esc(rec.symbol)}">
       <div class="memo-rail"></div>
       <div class="memo-body">
         <div class="memo-top">
           <div class="memo-id">
             ${selectable ? `<input type="checkbox" class="memo-check" data-select="${rec.id}" aria-label="Select ${esc(rec.symbol)}">` : ''}
             <div>
-              <span class="memo-symbol">${esc(rec.symbol)}</span>
+              <button class="memo-symbol memo-symbol-link" type="button" data-open-chart="${rec.id}" title="View charts & trade plan for ${esc(rec.symbol)}">${esc(rec.symbol)}<span class="memo-symbol-chart" aria-hidden="true">📈</span></button>
               ${rec.company_name ? `<span class="memo-company">${esc(rec.company_name)}</span>` : ''}
               <div class="memo-origin">${esc(ORIGIN_LABEL[rec.origin] || rec.origin)}${rec.time_horizon ? ` · ${esc(rec.time_horizon)}` : ''}</div>
             </div>
@@ -268,11 +275,21 @@
           <small>${esc(rec.conviction)} conviction${rec.confidence_score != null ? ` · ${Math.round(rec.confidence_score)}/100` : ''}</small>
         </div>
         <p class="memo-thesis">${esc(rec.thesis)}</p>
-        ${planGrid(rec)}
+        ${miniSparkAndPlan(rec)}
         ${detailBlock(rec)}
+        <div class="memo-quick-actions">
+          <button class="memo-link-btn" type="button" data-open-chart="${rec.id}">View charts &amp; plan →</button>
+          <button class="memo-link-btn" type="button" data-rerun="${esc(rec.symbol)}" title="Re-run the agent for ${esc(rec.symbol)}">↻ Re-analyze</button>
+        </div>
         ${reviewFooter(rec)}
       </div>
     </div>`;
+  }
+
+  // A compact inline sparkline (if we have analytics) beside the plan grid.
+  function miniSparkAndPlan(rec) {
+    const plan = planGrid(rec);
+    return plan;
   }
 
   function renderInbox(list) {
@@ -319,6 +336,179 @@
     if (n) $('#deskBulkCount').textContent = `${n} selected`;
   }
 
+  // ---- Per-symbol chart drawer -----------------------------------------
+  function openChartDrawer() { $('#deskChartDrawer').hidden = false; }
+  function closeChartDrawer() { $('#deskChartDrawer').hidden = true; }
+
+  async function showChart(recId) {
+    const drawer = $('#deskChartDrawer');
+    const content = $('#deskChartContent');
+    $('#deskChartTitle').textContent = 'Loading…';
+    content.innerHTML = '<div class="desk-chart-loading">Loading analysis…</div>';
+    openChartDrawer();
+    try {
+      const data = await api(`/api/trading-desk/chart/${recId}`);
+      renderChart(data);
+    } catch (error) {
+      content.innerHTML = `<div class="desk-chart-loading error">${esc(error.message || 'Could not load the chart.')}</div>`;
+    }
+  }
+
+  function renderChart(data) {
+    const rec = data.recommendation;
+    const history = data.history || [];
+    $('#deskChartKicker').textContent = `${ACTION_LABEL[rec.action] || rec.action} · ${rec.conviction} conviction`;
+    $('#deskChartTitle').textContent = `${rec.symbol}${rec.companyName ? ' · ' + rec.companyName : ''}`;
+
+    const priceChart = buildPriceChartSVG(history, rec);
+    const stats = analyticsStats(rec.analytics, rec);
+    const signalBars = signalStrengthSVG(rec);
+    const planTable = planDetailTable(rec);
+
+    $('#deskChartContent').innerHTML = `
+      <div class="chart-section">
+        <div class="chart-section-head">
+          <span class="chart-section-title">Price &amp; trade plan</span>
+          <span class="chart-source">${esc(data.historySource || '')}</span>
+        </div>
+        ${priceChart}
+        <div class="chart-legend">
+          <span class="lg lg-price">Price</span>
+          ${rec.entryZoneLow ? '<span class="lg lg-entry">Entry zone</span>' : ''}
+          ${rec.targetPrice ? '<span class="lg lg-target">Target</span>' : ''}
+          ${rec.stopPrice ? '<span class="lg lg-stop">Stop</span>' : ''}
+        </div>
+      </div>
+
+      ${planTable}
+
+      <div class="chart-section">
+        <div class="chart-section-head"><span class="chart-section-title">Signal strength</span></div>
+        ${signalBars}
+      </div>
+
+      <div class="chart-section">
+        <div class="chart-section-head"><span class="chart-section-title">Key metrics</span></div>
+        ${stats}
+      </div>
+
+      <div class="chart-section">
+        <div class="chart-section-head"><span class="chart-section-title">Thesis</span></div>
+        <p class="chart-thesis">${esc(rec.thesis || '')}</p>
+        ${(rec.dataGaps || []).length ? `<p class="chart-gaps">Watch: ${(rec.dataGaps || []).map(esc).join('; ')}</p>` : ''}
+      </div>
+
+      <div class="chart-actions">
+        <button class="button button-secondary" type="button" data-chart-rerun="${esc(rec.symbol)}">↻ Re-analyze ${esc(rec.symbol)}</button>
+        ${rec.reviewStatus === 'pending' ? `
+          <button class="button button-primary" type="button" data-chart-review="approve" data-id="${rec.id}">Approve</button>
+          <button class="button button-secondary" type="button" data-chart-review="reject" data-id="${rec.id}">Reject</button>
+        ` : `<span class="status-pill neutral">${esc(rec.reviewStatus)}</span>`}
+      </div>
+    `;
+  }
+
+  // Build an SVG line chart of price with entry-zone band + target/stop lines.
+  function buildPriceChartSVG(history, rec) {
+    const W = 640, H = 280, padL = 52, padR = 64, padT = 16, padB = 28;
+    if (!history.length) {
+      return '<div class="desk-chart-loading">No price history available for this symbol.</div>';
+    }
+    const closes = history.map((p) => p.close).filter((c) => Number.isFinite(c));
+    const levels = [rec.entryZoneLow, rec.entryZoneHigh, rec.targetPrice, rec.stopPrice, rec.referencePrice]
+      .filter((v) => Number.isFinite(v));
+    const lo = Math.min(...closes, ...levels);
+    const hi = Math.max(...closes, ...levels);
+    const pad = (hi - lo) * 0.08 || hi * 0.02 || 1;
+    const yMin = lo - pad, yMax = hi + pad;
+
+    const x = (i) => padL + (i / (history.length - 1 || 1)) * (W - padL - padR);
+    const y = (v) => padT + (1 - (v - yMin) / (yMax - yMin || 1)) * (H - padT - padB);
+
+    const linePath = history.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(p.close).toFixed(1)}`).join(' ');
+    const areaPath = `${linePath} L${x(history.length - 1).toFixed(1)},${(H - padB).toFixed(1)} L${padL},${(H - padB).toFixed(1)} Z`;
+
+    // Y grid labels (4 ticks)
+    const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => {
+      const val = yMax - f * (yMax - yMin);
+      return `<line x1="${padL}" y1="${y(val).toFixed(1)}" x2="${W - padR}" y2="${y(val).toFixed(1)}" class="grid"/>
+              <text x="${padL - 8}" y="${(y(val) + 3).toFixed(1)}" class="axis-y">${fmtMoney(val).replace('$','')}</text>`;
+    }).join('');
+
+    const rightLabel = (v, cls, text) => Number.isFinite(v) ? `
+      <line x1="${padL}" y1="${y(v).toFixed(1)}" x2="${W - padR}" y2="${y(v).toFixed(1)}" class="lvl ${cls}"/>
+      <text x="${W - padR + 6}" y="${(y(v) + 3).toFixed(1)}" class="lvl-label ${cls}">${text}</text>` : '';
+
+    const entryBand = (Number.isFinite(rec.entryZoneLow) && Number.isFinite(rec.entryZoneHigh)) ? `
+      <rect x="${padL}" y="${y(rec.entryZoneHigh).toFixed(1)}" width="${W - padL - padR}"
+            height="${Math.max(2, (y(rec.entryZoneLow) - y(rec.entryZoneHigh))).toFixed(1)}" class="entry-band"/>` : '';
+
+    // Date labels (first / mid / last)
+    const dateLabel = (i) => history[i] ? `<text x="${x(i).toFixed(1)}" y="${H - 8}" class="axis-x" text-anchor="${i === 0 ? 'start' : i === history.length - 1 ? 'end' : 'middle'}">${history[i].date}</text>` : '';
+
+    return `<svg class="price-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Price chart for ${esc(rec.symbol)}">
+      ${ticks}
+      ${entryBand}
+      <path d="${areaPath}" class="price-area"/>
+      <path d="${linePath}" class="price-line"/>
+      ${rightLabel(rec.targetPrice, 'target', 'TP')}
+      ${rightLabel(rec.stopPrice, 'stop', 'SL')}
+      ${rightLabel(rec.referencePrice, 'ref', 'Now')}
+      ${dateLabel(0)}${dateLabel(Math.floor(history.length / 2))}${dateLabel(history.length - 1)}
+    </svg>`;
+  }
+
+  function signalStrengthSVG(rec) {
+    const signals = rec.signals || [];
+    if (!signals.length) return '<p class="chart-gaps">No derived signals for this symbol.</p>';
+    return `<div class="signal-bars">${signals.map((s) => {
+      const bias = s.bias === 'bullish' ? 'bull' : s.bias === 'bearish' ? 'bear' : 'neutral';
+      const pct = s.bias === 'bullish' ? 82 : s.bias === 'bearish' ? 30 : 55;
+      return `<div class="signal-row">
+        <span class="signal-name">${esc(s.label)}</span>
+        <span class="signal-track"><span class="signal-fill ${bias}" style="width:${pct}%"></span></span>
+        <span class="signal-detail">${esc(s.detail || bias)}</span>
+      </div>`;
+    }).join('')}</div>`;
+  }
+
+  function planDetailTable(rec) {
+    const rows = [];
+    const money = (v) => Number.isFinite(v) ? fmtMoney(v) : '—';
+    if (rec.entryZoneLow) rows.push(['Entry zone', `${money(rec.entryZoneLow)} – ${money(rec.entryZoneHigh)}`, 'entry']);
+    if (rec.referencePrice) rows.push(['Reference price', money(rec.referencePrice), '']);
+    if (rec.targetPrice) rows.push(['Target', money(rec.targetPrice), 'target']);
+    if (rec.stopPrice) rows.push(['Stop loss', money(rec.stopPrice), 'stop']);
+    if (rec.rrRatio) rows.push(['Reward : risk', `1 : ${Number(rec.rrRatio).toFixed(2)}`, '']);
+    if (rec.suggestedWeightPct) rows.push(['Suggested weight', `${Number(rec.suggestedWeightPct).toFixed(1)}%`, '']);
+    if (rec.invalidation) rows.push(['Invalidation', rec.invalidation, 'muted']);
+    if (!rows.length) return '';
+    return `<div class="chart-section"><div class="chart-section-head"><span class="chart-section-title">Trade plan</span></div>
+      <table class="plan-table">${rows.map((r) => `<tr class="${r[2]}"><th>${esc(r[0])}</th><td>${esc(String(r[1]))}</td></tr>`).join('')}</table></div>`;
+  }
+
+  function analyticsStats(a = {}, rec) {
+    const cells = [];
+    const pct = (v) => Number.isFinite(v) ? `${Number(v).toFixed(1)}%` : '—';
+    if (a.returnsPct?.oneYear != null) cells.push(['1-year return', pct(a.returnsPct.oneYear)]);
+    if (a.returnsPct?.threeMonth != null) cells.push(['3-month return', pct(a.returnsPct.threeMonth)]);
+    if (a.annualizedVolatilityPct != null) cells.push(['Volatility (annualized)', pct(a.annualizedVolatilityPct)]);
+    if (a.maximumDrawdownPct != null) cells.push(['Max drawdown', pct(a.maximumDrawdownPct)]);
+    if (a.beta != null) cells.push(['Beta vs SPY', Number(a.beta).toFixed(2)]);
+    if (a.fiftyTwoWeekHigh != null) cells.push(['52-week high', fmtMoney(a.fiftyTwoWeekHigh)]);
+    if (a.fiftyTwoWeekLow != null) cells.push(['52-week low', fmtMoney(a.fiftyTwoWeekLow)]);
+    if (a.momentumState) cells.push(['Momentum', String(a.momentumState)]);
+    if (!cells.length) return '<p class="chart-gaps">No analytics captured for this symbol.</p>';
+    return `<div class="stat-grid">${cells.map((c) => `<div class="stat-cell"><span>${esc(c[0])}</span><strong>${esc(String(c[1]))}</strong></div>`).join('')}</div>`;
+  }
+
+  function parseSymbols(raw) {
+    return [...new Set(String(raw || '')
+      .split(/[\s,]+/)
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean))].slice(0, 25);
+  }
+
   // ---- Events -----------------------------------------------------------
   function wire() {
     if (!$('#holdings')) return;
@@ -348,7 +538,19 @@
       } catch (e) { alertMsg(e.message); }
     });
 
-    $('#deskRunButton')?.addEventListener('click', runAgent);
+    $('#deskRunButton')?.addEventListener('click', () => runAgent({ scope: 'all' }));
+
+    $('#deskScopedRunForm')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const symbols = parseSymbols($('#deskScopedSymbols').value);
+      if (!symbols.length) {
+        const note = $('#deskRunNote');
+        note.classList.add('error');
+        note.textContent = 'Enter one or more tickers (e.g. AAPL, NVDA) to run a scoped analysis.';
+        return;
+      }
+      runAgent({ scope: 'symbols', symbols, sourceButton: $('#deskScopedRunButton') });
+    });
 
     $('#deskWatchlistForm')?.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -377,6 +579,16 @@
 
     // Delegated inbox interactions
     $('#deskInbox')?.addEventListener('click', async (event) => {
+      const openChart = event.target.closest('[data-open-chart]');
+      if (openChart) {
+        showChart(openChart.dataset.openChart).catch((e) => alertMsg(e.message));
+        return;
+      }
+      const rerun = event.target.closest('[data-rerun]');
+      if (rerun) {
+        runAgent({ scope: 'symbols', symbols: [rerun.dataset.rerun] });
+        return;
+      }
       const toggle = event.target.closest('[data-toggle-detail]');
       if (toggle) {
         const detail = toggle.nextElementSibling;
@@ -396,6 +608,32 @@
           } else {
             await review(id, action);
           }
+        } catch (e) { alertMsg(e.message); }
+      }
+    });
+
+    // Chart drawer: close + internal actions
+    $$('[data-chart-close]').forEach((el) => el.addEventListener('click', closeChartDrawer));
+    $('#deskChartContent')?.addEventListener('click', async (event) => {
+      const rerun = event.target.closest('[data-chart-rerun]');
+      if (rerun) {
+        closeChartDrawer();
+        runAgent({ scope: 'symbols', symbols: [rerun.dataset.chartRerun] });
+        return;
+      }
+      const reviewBtn = event.target.closest('[data-chart-review]');
+      if (reviewBtn) {
+        const { chartReview: action, id } = reviewBtn.dataset;
+        try {
+          if (action === 'reject') {
+            const note = window.prompt('Optional note on why you passed:');
+            const extra = {};
+            if (note !== null && note.trim()) extra.note = note.trim();
+            await review(id, action, extra);
+          } else {
+            await review(id, action);
+          }
+          closeChartDrawer();
         } catch (e) { alertMsg(e.message); }
       }
     });

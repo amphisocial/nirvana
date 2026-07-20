@@ -90,15 +90,54 @@ export async function executeTradingRun({
   trigger = 'manual',
   startedByUserId = null,
   maxLiveSymbols = 24,
-  discoveryIdeas = []
+  discoveryIdeas = [],
+  // Scope control:
+  //  - 'all'      → evaluate every holding + watchlist symbol (+ discoveryIdeas)
+  //  - 'symbols'  → evaluate ONLY the symbols in `symbols` (owned ones keep their
+  //                 holding context; unknown ones are treated as discovery ideas)
+  scope = 'all',
+  symbols = []
 }) {
-  const [portfolio, watchlistResult] = await Promise.all([
+  const [fullPortfolio, watchlistResult] = await Promise.all([
     loadTradingPortfolio(householdId),
     pool.query(`SELECT symbol, name FROM trading_watchlist_items WHERE household_id=$1`, [householdId])
   ]);
 
-  if (!portfolio.holdings.length && !watchlistResult.rowCount && !discoveryIdeas.length) {
-    const err = new Error('Add at least one holding or watchlist symbol before running the agent.');
+  const requested = [...new Set((symbols || []).map((s) => String(s).toUpperCase()).filter(Boolean))];
+  const scoped = scope === 'symbols';
+
+  if (scoped && !requested.length) {
+    const err = new Error('Provide at least one symbol to run a scoped analysis.');
+    err.code = 'empty_universe';
+    throw err;
+  }
+
+  // The full portfolio is always used for risk context (concentration, cash),
+  // but the *evaluated universe* is narrowed when a scope is given.
+  const portfolio = fullPortfolio;
+
+  let holdingsForRun = portfolio.holdings;
+  let watchlistForRun = watchlistResult.rows;
+  let discoveryForRun = discoveryIdeas;
+
+  if (scoped) {
+    const requestedSet = new Set(requested);
+    holdingsForRun = portfolio.holdings.filter((h) => requestedSet.has(String(h.symbol).toUpperCase()));
+    watchlistForRun = watchlistResult.rows.filter((w) => requestedSet.has(String(w.symbol).toUpperCase()));
+    const known = new Set([
+      ...holdingsForRun.map((h) => String(h.symbol).toUpperCase()),
+      ...watchlistForRun.map((w) => String(w.symbol).toUpperCase())
+    ]);
+    // Anything requested but not owned / not on the watchlist → discovery idea.
+    discoveryForRun = requested
+      .filter((s) => !known.has(s))
+      .map((s) => ({ symbol: s, name: null }));
+  }
+
+  if (!holdingsForRun.length && !watchlistForRun.length && !discoveryForRun.length) {
+    const err = new Error(scoped
+      ? 'None of the requested symbols could be evaluated.'
+      : 'Add at least one holding or watchlist symbol before running the agent.');
     err.code = 'empty_universe';
     throw err;
   }
@@ -110,7 +149,11 @@ export async function executeTradingRun({
     [
       householdId, trigger, settings.risk_profile, config.ai.provider, config.ai.model,
       startedByUserId,
-      JSON.stringify({ totalValue: portfolio.totalValue, cashPct: portfolio.cashPct, positions: portfolio.holdings.length })
+      JSON.stringify({
+        totalValue: portfolio.totalValue, cashPct: portfolio.cashPct,
+        positions: portfolio.holdings.length,
+        scope, scopedSymbols: scoped ? requested : null
+      })
     ]
   );
   const runId = runRow.rows[0].id;
@@ -118,9 +161,9 @@ export async function executeTradingRun({
   let workflow;
   try {
     workflow = await runTradingWorkflow({
-      holdings: portfolio.holdings,
-      watchlist: watchlistResult.rows,
-      discoveryIdeas,
+      holdings: holdingsForRun,
+      watchlist: watchlistForRun,
+      discoveryIdeas: discoveryForRun,
       portfolio,
       settings: {
         riskProfile: settings.risk_profile,
@@ -139,21 +182,34 @@ export async function executeTradingRun({
   }
 
   const summary = `${workflow.recommendations.length} recommendation${workflow.recommendations.length === 1 ? '' : 's'} across ${workflow.symbolsEvaluated} evaluated symbols.`;
+  const newSymbols = [...new Set(workflow.recommendations.map((r) => r.symbol))];
   await withTransaction(async (client) => {
+    // Re-running (whole-set or scoped) replaces any still-pending recommendation
+    // for the same symbol, so the inbox never accumulates duplicate pending memos.
+    // Already-reviewed memos (approved/rejected/etc.) are left untouched as history.
+    if (newSymbols.length) {
+      await client.query(
+        `UPDATE trading_recommendations
+         SET review_status='superseded', updated_at=now()
+         WHERE household_id=$1 AND review_status='pending' AND symbol = ANY($2::text[])`,
+        [householdId, newSymbols]
+      );
+    }
     for (const rec of workflow.recommendations) {
       await client.query(
         `INSERT INTO trading_recommendations
            (household_id, run_id, symbol, company_name, action, origin, conviction,
             confidence_score, time_horizon, reference_price, entry_zone_low, entry_zone_high,
             target_price, stop_price, invalidation, rr_ratio, suggested_weight_pct,
-            thesis, signals, risk_checks, data_gaps)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
+            thesis, signals, risk_checks, data_gaps, price_history, analytics_snapshot)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
         [
           householdId, runId, rec.symbol, rec.companyName, rec.action, rec.origin,
           rec.conviction, rec.confidenceScore, rec.timeHorizon, rec.referencePrice,
           rec.entryZoneLow, rec.entryZoneHigh, rec.targetPrice, rec.stopPrice,
           rec.invalidation, rec.rrRatio, rec.suggestedWeightPct, rec.thesis,
-          JSON.stringify(rec.signals), JSON.stringify(rec.riskChecks), JSON.stringify(rec.dataGaps)
+          JSON.stringify(rec.signals), JSON.stringify(rec.riskChecks), JSON.stringify(rec.dataGaps),
+          JSON.stringify(rec.priceHistory ?? []), JSON.stringify(rec.analyticsSnapshot ?? {})
         ]
       );
     }

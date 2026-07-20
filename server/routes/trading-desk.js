@@ -3,6 +3,7 @@ import { rateLimit } from 'express-rate-limit';
 import { z } from 'zod';
 import { pool, withTransaction } from '../db.js';
 import { config } from '../config.js';
+import { getHistory } from '../services/market/index.js';
 import {
   loadTradingSettings,
   executeTradingRun,
@@ -209,6 +210,9 @@ tradingDeskRouter.delete('/watchlist/:id', requireFeatureEnabled, async (req, re
 // ===========================================================================
 const runSchema = z.object({
   maxLiveSymbols: z.coerce.number().int().min(1).max(40).optional().default(24),
+  scope: z.enum(['all', 'symbols']).optional().default('all'),
+  symbols: z.array(z.string().trim().min(1).max(12).transform((s) => s.toUpperCase()))
+    .max(25).optional().default([]),
   discoveryIdeas: z.array(z.object({
     symbol: z.string().trim().min(1).max(12).transform((s) => s.toUpperCase()),
     name: z.string().trim().max(120).optional().nullable()
@@ -226,6 +230,8 @@ tradingDeskRouter.post('/run', runLimiter, requireFeatureEnabled, async (req, re
       trigger: 'manual',
       startedByUserId: req.user?.id || null,
       maxLiveSymbols: value.maxLiveSymbols,
+      scope: value.scope,
+      symbols: value.symbols,
       discoveryIdeas: value.discoveryIdeas
     });
 
@@ -247,7 +253,7 @@ tradingDeskRouter.get('/inbox', requireFeatureEnabled, async (req, res, next) =>
       .catch('pending').parse(req.query.status);
 
     const params = [req.householdId];
-    let where = 'household_id=$1';
+    let where = "household_id=$1 AND review_status <> 'superseded'";
     if (status !== 'all') { params.push(status); where += ` AND review_status=$${params.length}`; }
 
     const [rows, counts] = await Promise.all([
@@ -262,6 +268,8 @@ tradingDeskRouter.get('/inbox', requireFeatureEnabled, async (req, res, next) =>
                 invalidation, rr_ratio::float8 AS rr_ratio,
                 suggested_weight_pct::float8 AS suggested_weight_pct,
                 thesis, signals, risk_checks, data_gaps,
+                analytics_snapshot,
+                jsonb_array_length(price_history) AS chart_points,
                 review_status, review_note, reviewed_at, created_at
          FROM trading_recommendations
          WHERE ${where}
@@ -274,7 +282,9 @@ tradingDeskRouter.get('/inbox', requireFeatureEnabled, async (req, res, next) =>
       ),
       pool.query(
         `SELECT review_status, COUNT(*)::int AS n
-         FROM trading_recommendations WHERE household_id=$1 GROUP BY review_status`,
+         FROM trading_recommendations
+         WHERE household_id=$1 AND review_status <> 'superseded'
+         GROUP BY review_status`,
         [req.householdId]
       )
     ]);
@@ -283,6 +293,76 @@ tradingDeskRouter.get('/inbox', requireFeatureEnabled, async (req, res, next) =>
     for (const row of counts.rows) countMap[row.review_status] = row.n;
 
     res.json({ recommendations: rows.rows, counts: countMap });
+  } catch (error) { next(error); }
+});
+
+// ===========================================================================
+// PER-SYMBOL CHART — price history + trade-plan overlays for one recommendation
+// ===========================================================================
+tradingDeskRouter.get('/chart/:id', requireFeatureEnabled, async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, symbol, company_name, action, origin, conviction,
+              confidence_score::float8 AS confidence_score, time_horizon,
+              reference_price::float8 AS reference_price,
+              entry_zone_low::float8 AS entry_zone_low,
+              entry_zone_high::float8 AS entry_zone_high,
+              target_price::float8 AS target_price,
+              stop_price::float8 AS stop_price,
+              rr_ratio::float8 AS rr_ratio, invalidation,
+              suggested_weight_pct::float8 AS suggested_weight_pct,
+              thesis, signals, risk_checks, data_gaps,
+              price_history, analytics_snapshot, review_status, created_at
+       FROM trading_recommendations
+       WHERE id=$1 AND household_id=$2`,
+      [req.params.id, req.householdId]
+    );
+    if (!result.rowCount) return res.status(404).json({ error: 'Recommendation not found.' });
+    const rec = result.rows[0];
+
+    let history = Array.isArray(rec.price_history) ? rec.price_history : [];
+    let historySource = 'agent snapshot';
+
+    // If the snapshot is empty (e.g. deferred scan), fetch live history on demand.
+    if (!history.length) {
+      try {
+        const live = await getHistory(rec.symbol, '1y');
+        history = (live?.points || []).map((p) => ({ date: p.date, close: p.close }));
+        historySource = live?.source || 'live market data';
+      } catch (error) {
+        history = [];
+        historySource = `unavailable (${error.message})`;
+      }
+    }
+
+    res.json({
+      recommendation: {
+        id: rec.id,
+        symbol: rec.symbol,
+        companyName: rec.company_name,
+        action: rec.action,
+        origin: rec.origin,
+        conviction: rec.conviction,
+        confidenceScore: rec.confidence_score,
+        timeHorizon: rec.time_horizon,
+        referencePrice: rec.reference_price,
+        entryZoneLow: rec.entry_zone_low,
+        entryZoneHigh: rec.entry_zone_high,
+        targetPrice: rec.target_price,
+        stopPrice: rec.stop_price,
+        rrRatio: rec.rr_ratio,
+        invalidation: rec.invalidation,
+        suggestedWeightPct: rec.suggested_weight_pct,
+        thesis: rec.thesis,
+        signals: rec.signals,
+        riskChecks: rec.risk_checks,
+        dataGaps: rec.data_gaps,
+        analytics: rec.analytics_snapshot || {},
+        reviewStatus: rec.review_status
+      },
+      history,
+      historySource
+    });
   } catch (error) { next(error); }
 });
 
