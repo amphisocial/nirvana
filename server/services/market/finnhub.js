@@ -17,6 +17,9 @@ let requestChain = Promise.resolve();
 let lastRequestAt = 0;
 let blockedUntil = 0;
 
+// Test-only: clear the rate-limit pause between unit tests.
+export function __resetFinnhubRateLimitForTests() { blockedUntil = 0; lastRequestAt = 0; }
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function numberOrNull(value) {
@@ -88,46 +91,69 @@ function rangeStartEpoch(range) {
 // ---------------------------------------------------------------------------
 // History
 // ---------------------------------------------------------------------------
+function candleCountForRange(range) {
+  // Daily bars: enough to cover the window with headroom.
+  if (range === '3m') return 70;
+  if (range === '6m') return 130;
+  if (range === 'ytd') return 260;
+  return 260; // 1y of trading days
+}
+
+function parseCandles(data, normalized, range, resolution) {
+  if (!data || data.s !== 'ok' || !Array.isArray(data.c) || !data.c.length || !Array.isArray(data.t)) {
+    return null;
+  }
+  const points = data.t
+    .map((epoch, i) => ({
+      date: new Date(epoch * 1000).toISOString().slice(0, 10),
+      close: Number(data.c[i])
+    }))
+    .filter((p) => Number.isFinite(p.close))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  if (!points.length) return null;
+  return {
+    symbol: normalized,
+    range,
+    points,
+    source: `Finnhub ${resolution === 'W' ? 'weekly' : resolution === 'M' ? 'monthly' : 'daily'} candles`,
+    delayed: true,
+    asOf: points.at(-1)?.date || null
+  };
+}
+
 export async function getFinnhubHistory(symbol, range = '3m') {
   const normalized = symbol.toUpperCase();
   const { resolution } = resolutionForRange(range);
   const from = rangeStartEpoch(range);
   const to = Math.floor(Date.now() / 1000);
 
-  // Try premium candles first.
   let candleError = null;
+
+  // Attempt 1: count-based daily candles. This form is the most reliable on the
+  // free tier (works where from/to date ranges sometimes 403 or return no_data).
   try {
-    const data = await request('/stock/candle', { symbol: normalized, resolution, from, to });
-    if (data && data.s === 'ok' && Array.isArray(data.c) && data.c.length) {
-      const points = data.t
-        .map((epoch, i) => ({
-          date: new Date(epoch * 1000).toISOString().slice(0, 10),
-          close: Number(data.c[i])
-        }))
-        .filter((p) => Number.isFinite(p.close))
-        .sort((a, b) => a.date.localeCompare(b.date));
-      if (points.length) {
-        return {
-          symbol: normalized,
-          range,
-          points,
-          source: `Finnhub ${resolution === 'W' ? 'weekly' : 'daily'} candles`,
-          delayed: true,
-          asOf: points.at(-1)?.date || null
-        };
-      }
-    }
+    const data = await request('/stock/candle', {
+      symbol: normalized, resolution: 'D', count: candleCountForRange(range)
+    });
+    const parsed = parseCandles(data, normalized, range, 'D');
+    if (parsed) return parsed;
     if (data && data.s === 'no_data') candleError = new Error('Finnhub returned no candle data');
   } catch (error) {
     candleError = error;
-    // 403 => candles are premium-only on this plan; fall through to synthesis.
-    if (!/403|premium|access|rate limit|429/i.test(error.message)) {
-      // For unexpected errors, still attempt synthesis below rather than failing hard.
-    }
   }
 
-  // Fallback: synthesize a minimal 2-point history from quote + 52-week metrics
-  // so analytics (which need at least first/last close) can still run.
+  // Attempt 2: explicit from/to range at the range-appropriate resolution.
+  try {
+    const data = await request('/stock/candle', { symbol: normalized, resolution, from, to });
+    const parsed = parseCandles(data, normalized, range, resolution);
+    if (parsed) return parsed;
+    if (data && data.s === 'no_data') candleError = new Error('Finnhub returned no candle data');
+  } catch (error) {
+    candleError = error;
+  }
+
+  // Attempt 3 (last resort): synthesize a minimal series from quote + 52-week
+  // metrics so basic analytics can still run, clearly flagged as synthesized.
   const synthesized = await synthesizeHistoryFromMetrics(normalized, range);
   if (synthesized) return synthesized;
 

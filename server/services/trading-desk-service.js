@@ -171,7 +171,9 @@ export async function executeTradingRun({
         maxNewIdeas: settings.max_new_ideas ?? 3,
         cashReservePct: number(settings.cash_reserve_pct, 5)
       },
-      maxLiveSymbols
+      maxLiveSymbols,
+      // On a scoped run, every requested symbol should always return a memo.
+      alwaysInclude: scoped ? requested : []
     });
   } catch (engineError) {
     await pool.query(

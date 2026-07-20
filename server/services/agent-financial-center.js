@@ -34,11 +34,16 @@ function round(value, digits = 2) {
 }
 
 function dateOnly(value = new Date()) {
-  return new Date(value).toISOString().slice(0, 10);
+  const date = new Date(value);
+  // Guard against Invalid Date (e.g. a malformed start_date in the DB), which
+  // would otherwise throw RangeError: Invalid time value from toISOString().
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
 }
 
 function startOfWeek(value = new Date()) {
   const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
   const day = date.getUTCDay();
   date.setUTCDate(date.getUTCDate() - day);
   return date.toISOString().slice(0, 10);
@@ -582,7 +587,9 @@ export async function refreshLargeExpenseAlerts(householdId) {
   const activeKeys = [];
   for (const expense of result.rows) {
     const monthly = number(expense.annual_amount) / 12;
-    const start = expense.start_date ? new Date(`${String(expense.start_date).slice(0, 10)}T00:00:00Z`) : null;
+    const parsedStart = expense.start_date ? new Date(`${String(expense.start_date).slice(0, 10)}T00:00:00Z`) : null;
+    // Ignore unparseable start dates so downstream date math/formatting is safe.
+    const start = parsedStart && !Number.isNaN(parsedStart.getTime()) ? parsedStart : null;
     const upcoming = start && start >= now && start <= cutoff;
     if (monthly < config.agent.largeExpenseThreshold && !upcoming) continue;
     const dedupeKey = `large-expense:${expense.id}`;

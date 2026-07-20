@@ -87,7 +87,7 @@ app.get('/api/health', async (_req, res) => {
     service: 'nirvana',
     status: database === 'ok' ? 'ok' : 'degraded',
     database,
-    version: '1.1.0',
+    version: '1.1.1',
     agentScheduler: config.agent.schedulerEnabled ? 'enabled' : 'disabled'
   });
 });

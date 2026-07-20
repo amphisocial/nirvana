@@ -324,6 +324,10 @@ export async function runTradingWorkflow({
   portfolio,
   settings,
   maxLiveSymbols = 24,
+  // Symbols the user explicitly asked to analyze (scoped run). These always
+  // produce a recommendation, even if they'd normally be gated out as a weak
+  // discovery idea — the user asked, so they should always get an answer.
+  alwaysInclude = [],
   onStage = () => {}
 }) {
   const stages = [];
@@ -398,13 +402,21 @@ export async function runTradingWorkflow({
 
   // Filter: keep holdings advice always; keep new ideas only if they pass risk
   // and clear the conviction floor. Cap new ideas by settings.maxNewIdeas.
+  const alwaysSet = new Set((alwaysInclude || []).map((s) => String(s).toUpperCase()));
   const holdingRecos = candidates.filter((c) => c.origin === 'holding');
   const ideaRecos = candidates
     .filter((c) => c.origin !== 'holding' && c.riskPassed && ['buy', 'add', 'new_idea'].includes(c.action))
     .sort((a, b) => (b.confidenceScore ?? 0) - (a.confidenceScore ?? 0))
     .slice(0, settings.maxNewIdeas ?? 3);
 
-  const finalCandidates = [...holdingRecos, ...ideaRecos];
+  // Any explicitly-requested symbol that got filtered out is added back, so a
+  // scoped "analyze NFLX" always returns an NFLX memo (even if it's a hold/pass).
+  const includedSymbols = new Set([...holdingRecos, ...ideaRecos].map((c) => c.symbol));
+  const forcedRecos = candidates.filter(
+    (c) => alwaysSet.has(c.symbol) && !includedSymbols.has(c.symbol)
+  );
+
+  const finalCandidates = [...holdingRecos, ...ideaRecos, ...forcedRecos];
 
   record('complete', 'Decision memos ready', `${finalCandidates.length} recommendation${finalCandidates.length === 1 ? '' : 's'} routed to the AI Inbox for human review.`);
 
