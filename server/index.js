@@ -21,6 +21,7 @@ import { holdingsLabRouter } from './routes/holdings-lab.js';
 import { retirementRouter } from './routes/retirement.js';
 import { planningRouter } from './routes/planning.js';
 import { intelligenceRouter } from './routes/intelligence.js';
+import { agentSettingsRouter } from './routes/agent-settings.js';
 import { goalsRouter } from './routes/goals.js';
 import { householdSharingRouter } from './routes/household-sharing.js';
 import { chatRouter } from './routes/chat.js';
@@ -87,8 +88,13 @@ app.get('/api/health', async (_req, res) => {
     service: 'nirvana',
     status: database === 'ok' ? 'ok' : 'degraded',
     database,
-    version: '1.1.1',
-    agentScheduler: config.agent.schedulerEnabled ? 'enabled' : 'disabled'
+    version: '1.1.2',
+    agentScheduler: {
+      enabled: config.agent.schedulerEnabled,
+      nightlyEnabled: config.agent.nightlyEnabled,
+      weeklyEnabled: config.agent.weeklyEnabled,
+      tradingDeskEnabled: config.tradingDesk.schedulerEnabled
+    }
   });
 });
 
@@ -116,6 +122,7 @@ app.use('/api/real-estate', aiLimiter, requireAuth, householdContext, realEstate
 app.use('/api/holdings-lab', requireAuth, householdContext, holdingsLabRouter);
 app.use('/api/retirement', requireAuth, householdContext, retirementRouter);
 app.use('/api/planning', requireAuth, householdContext, planningRouter);
+app.use('/api/intelligence/agent-settings', requireAuth, householdContext, agentSettingsRouter);
 app.use('/api/intelligence', requireAuth, householdContext, intelligenceRouter);
 app.use('/api/goals', requireAuth, householdContext, goalsRouter);
 app.use('/api/household', requireAuth, householdContext, householdSharingRouter);

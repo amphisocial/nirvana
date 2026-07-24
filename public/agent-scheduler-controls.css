@@ -1,0 +1,22 @@
+#agentScheduleControls{margin:18px 0}
+.agent-schedule-head{align-items:flex-start}
+.agent-schedule-head p{margin:.35rem 0 0;color:var(--muted);max-width:62ch}
+.agent-schedule-warning{margin:12px 0;padding:11px 13px;border:1px solid #e9b949;background:#fff8df;color:#7a4d00;border-radius:10px;font-size:.9rem;font-weight:650}
+.agent-schedule-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:16px}
+.agent-schedule-option{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--surface-soft,#f7fbff);cursor:pointer}
+.agent-schedule-option:has(input:disabled){cursor:not-allowed;opacity:.72}
+.agent-schedule-copy{display:flex;flex-direction:column;gap:3px}
+.agent-schedule-copy strong{font-size:1rem}
+.agent-schedule-copy small{color:var(--blue,#1976c5);font-weight:700}
+.agent-schedule-copy em{font-style:normal;color:var(--muted);font-size:.84rem;line-height:1.4}
+.agent-switch{position:relative;display:inline-flex;flex:0 0 auto}
+.agent-switch input{position:absolute;opacity:0;pointer-events:none}
+.agent-switch span{display:block;width:48px;height:27px;border-radius:999px;background:#aab8c5;box-shadow:inset 0 0 0 1px rgba(0,0,0,.08);transition:.18s}
+.agent-switch span:after{content:"";display:block;width:21px;height:21px;margin:3px;border-radius:50%;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.22);transition:.18s}
+.agent-switch input:checked+span{background:var(--blue,#1976c5)}
+.agent-switch input:checked+span:after{transform:translateX(21px)}
+.agent-switch input:focus-visible+span{outline:3px solid rgba(25,118,197,.25);outline-offset:2px}
+.agent-schedule-actions{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:16px;padding-top:15px;border-top:1px solid var(--line)}
+.agent-schedule-actions>div:first-child{display:flex;flex-direction:column;gap:3px}
+.agent-schedule-actions small{color:var(--muted)}
+@media(max-width:760px){.agent-schedule-grid{grid-template-columns:1fr}.agent-schedule-actions{align-items:stretch;flex-direction:column}.agent-schedule-actions .inline-actions{width:100%}.agent-schedule-actions .button{flex:1}}

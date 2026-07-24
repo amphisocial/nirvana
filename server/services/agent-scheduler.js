@@ -2,6 +2,7 @@ import { pool } from '../db.js';
 import { config } from '../config.js';
 import { claimAgentRun, runNightlyAgent, runWeeklyAgent } from './agent-financial-center.js';
 import { runScheduledTradingDeskForAll } from './trading-desk-service.js';
+import { shouldRunScheduledAgent } from './agent-settings.js';
 
 const HOUR_MS = 60 * 60 * 1000;
 let timer = null;
@@ -44,21 +45,41 @@ export async function tickAgentScheduler(now = new Date()) {
     const nightlyDue = local.hour >= config.agent.nightlyHour;
     const weeklyPeriodKey = scheduledDateForCurrentWeek(local.dateKey, local.day, config.agent.weeklyDay);
     const weeklyDue = local.day !== config.agent.weeklyDay || local.hour >= config.agent.weeklyHour;
-    const households = await pool.query('SELECT id FROM households ORDER BY created_at');
+    const households = await pool.query(`
+      SELECT h.id,
+             COALESCE(s.nightly_enabled, true) AS nightly_enabled,
+             COALESCE(s.weekly_enabled, true) AS weekly_enabled
+      FROM households h
+      LEFT JOIN household_agent_settings s ON s.household_id=h.id
+      ORDER BY h.created_at`);
 
     for (const household of households.rows) {
       try {
-        // Claims make these catch-up checks idempotent. A restart after the
-        // scheduled hour still completes the current day's/week's work.
-        if (nightlyDue) await runClaimed(household.id, 'nightly', local.dateKey);
-        if (weeklyDue) await runClaimed(household.id, 'weekly', weeklyPeriodKey);
+        // Claims make these catch-up checks idempotent. Disabled schedules are
+        // skipped before a claim is created, so they consume neither AI nor
+        // market-data credits.
+        if (shouldRunScheduledAgent({
+          globalEnabled: config.agent.nightlyEnabled,
+          householdEnabled: household.nightly_enabled,
+          due: nightlyDue
+        })) {
+          await runClaimed(household.id, 'nightly', local.dateKey);
+        }
+        if (shouldRunScheduledAgent({
+          globalEnabled: config.agent.weeklyEnabled,
+          householdEnabled: household.weekly_enabled,
+          due: weeklyDue
+        })) {
+          await runClaimed(household.id, 'weekly', weeklyPeriodKey);
+        }
       } catch (error) {
         console.error(`Agent scheduler failed for household ${household.id}:`, error);
       }
     }
 
-    // Trading Desk nightly pass — only households with the premium feature and
-    // auto-run both enabled. Deduped per household per day inside the service.
+    // Trading Desk has its own global and per-household auto-run controls.
+    // AGENT_SCHEDULER_ENABLED remains the emergency kill switch for every
+    // in-process scheduled workflow, including Trading Desk.
     if (nightlyDue && config.tradingDesk.schedulerEnabled) {
       try {
         const outcome = await runScheduledTradingDeskForAll(local.dateKey);
@@ -79,7 +100,11 @@ export function startAgentScheduler() {
     console.log('Nirvana agent scheduler is disabled.');
     return () => {};
   }
-  console.log(`Nirvana agent scheduler enabled for ${config.agent.timezone}; nightly after ${config.agent.nightlyHour}:00, weekly day ${config.agent.weeklyDay} after ${config.agent.weeklyHour}:00.`);
+  console.log(
+    `Nirvana agent scheduler enabled for ${config.agent.timezone}; ` +
+    `nightly=${config.agent.nightlyEnabled ? `after ${config.agent.nightlyHour}:00` : 'off'}, ` +
+    `weekly=${config.agent.weeklyEnabled ? `day ${config.agent.weeklyDay} after ${config.agent.weeklyHour}:00` : 'off'}.`
+  );
   const initial = setTimeout(() => tickAgentScheduler().catch((error) => console.error('Initial agent tick failed:', error)), 10_000);
   initial.unref();
   timer = setInterval(() => tickAgentScheduler().catch((error) => console.error('Agent tick failed:', error)), HOUR_MS);

@@ -78,7 +78,12 @@ export const config = {
     delayNotice: process.env.MARKET_DATA_DELAY_NOTICE || 'Market data may be delayed or incomplete.'
   },
   agent: {
+    // Emergency kill switch for every in-process scheduled workflow.
     schedulerEnabled: bool(process.env.AGENT_SCHEDULER_ENABLED, nodeEnv === 'production'),
+    // Independent server-wide controls for the Financial Center schedules.
+    // Household owners can further disable either schedule in the product UI.
+    nightlyEnabled: bool(process.env.AGENT_NIGHTLY_ENABLED, true),
+    weeklyEnabled: bool(process.env.AGENT_WEEKLY_ENABLED, true),
     timezone: process.env.AGENT_TIMEZONE || 'America/New_York',
     nightlyHour: int(process.env.AGENT_NIGHTLY_HOUR, 2),
     weeklyDay: int(process.env.AGENT_WEEKLY_DAY, 0),
