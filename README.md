@@ -1,81 +1,82 @@
-# Nirvana Phase 1
+# Nirvana scheduled-agent controls
 
-Nirvana is a personal finance and retirement-planning command center inspired by the strongest workflow patterns in Boldin, while deliberately keeping the first release small enough to ship and operate.
+Built against `amphisocial/nirvana` main commit:
 
-## Phase 1 scope
+`c79083521f2bc37bd6c826bc7c49a9963085c939`
 
-- Google sign-in and household profile
-- Manual account, liability, income, expense, and holding entry
-- CSV holding import as the backup to account aggregation
-- Blue-and-white lifetime net-worth dashboard with stacked asset/debt bars and linked inflow, outflow, and net cash-flow trends
-- Retirement projection with deterministic and Monte Carlo views, account-linked cash flows, and feasible-retirement-age analysis
-- Stock trend charts for 3M, 6M, YTD, and 1Y
-- Evidence-driven Research AI that treats any ticker mention as a research request, builds a one-year data packet, calculates trend/risk metrics, retrieves recent news, and produces a default chart
-- Server-side Markdown skills and intent-based skill-agent routing
-- Brokerage and IRA holdings workbench with saved market-history Monte Carlo account forecasts
-- Loan and mortgage term, payoff, payment, escrow, insurance, PMI, and HOA modeling
-- Portfolio buy/sell what-if scenarios without trade execution
-- Stripe-ready subscription hooks
-- Plaid-ready schema and feature flags, disabled by default
-- PM2 service named `nirvana`
+## Immediate emergency stop
 
-The desktop application includes a collapsible navigation rail and a persistent Nirvana AI planner.
+Before deploying code, you can stop all in-process scheduled workflows,
+including the Financial Center and Trading Desk, by setting this in the
+production `.env`:
 
-## Product boundary
+```dotenv
+AGENT_SCHEDULER_ENABLED=false
+```
 
-Nirvana Phase 1 is an educational planning and research product. It does not execute trades and should not call its outputs individualized investment advice. The AI explains model output; deterministic financial functions and market-data services perform the calculations.
-
-## Quick start
+Then reload PM2:
 
 ```bash
-cp .env.example .env
-# If your file browser hides dotfiles, copy env.example.txt instead
+pm2 restart nirvana --update-env
+```
+
+## Apply the code patch
+
+From the root of your local Nirvana checkout:
+
+```bash
+bash /path/to/this-folder/apply.sh .
 npm install
 npm run db:migrate
-npm run db:seed
-npm run dev
+npm test
+git add .
+git commit -m "Add scheduled agent pause controls"
+git push
 ```
 
-Open `http://localhost:5015`. With `DEMO_MODE=true`, the seeded demo household is used automatically.
-
-## Production
-
-Nirvana is designed to run as another PM2 service behind the existing shared Nginx instance used by the other AthenaBot applications.
+On EC2:
 
 ```bash
-rm -rf node_modules
-npm cache verify
-npm ci --omit=dev --registry=https://registry.npmjs.org --no-audit --no-fund
+cd /opt/apps/nirvana
+git pull
+npm install --omit=dev
 npm run db:migrate
-pm2 start ecosystem.config.cjs --env production
-pm2 save
+pm2 restart nirvana --update-env
+pm2 logs nirvana --lines 100
 ```
 
-The deployment guide includes recovery from a stale `npm ci`, the dedicated PostgreSQL role/database grants, the Nginx site block for port `5015`, and the Certbot certificate command. The repository-level `.npmrc` and lockfile use the public npm registry. Do not install a second Nginx service.
+Run the migration before restarting because the scheduler reads the new
+`household_agent_settings` table.
 
-## Plaid decision
+## What users see
 
-Plaid is not required to launch. Phase 1 uses manual entry and CSV import. Phase 2 can enable Plaid Link, Transactions, Investments, and Liabilities behind `PLAID_ENABLED=true`. The database already contains a `plaid_items` table so migration does not require redesigning the household/account model.
+In **Insights**, the household owner gets two switches:
 
-## Market data
+- Nightly Financial Center
+- Weekly Financial Center
 
-`MARKET_DATA_PROVIDER=mock` makes local development deterministic and must not be used for real research. Set `MARKET_DATA_PROVIDER=alphavantage` and add `ALPHAVANTAGE_API_KEY` for live quotes, company overview/fundamentals, one-year history, calculated returns/volatility/drawdown, and recent news. Any ticker mention now launches this evidence packet and shows a default one-year chart; explicit 3M, 6M, or YTD requests crop the chart accordingly.
+The owner can save either switch independently or click **Pause both**.
+Shared members can see status but cannot change it. Manual runs still work.
 
-When `AI_PROVIDER=openai` and `AI_WEB_SEARCH_ENABLED=true`, the Responses API web-search tool supplements the structured market packet with current filings, investor-relations material, and reputable reporting. Alpha Vantage news remains available to all configured AI providers.
+Trading Desk overnight automation remains separately controlled under
+**Holdings → Trading Desk → Settings**.
 
-## AI skills
+## Server-wide controls
 
-Skills are plain Markdown files in `server/skills`. Enable or disable them with `AI_ENABLED_SKILLS`. The server routes each prompt to the relevant enabled skill-agents (personal finance, retirement, stock research, and portfolio scenarios) and loads only those Markdown instructions. This keeps behavior editable without changing application code while avoiding an expensive autonomous multi-agent swarm in Phase 1.
+```dotenv
+AGENT_SCHEDULER_ENABLED=true
+AGENT_NIGHTLY_ENABLED=true
+AGENT_WEEKLY_ENABLED=true
+```
 
-## Important next hardening steps
+`AGENT_SCHEDULER_ENABLED=false` overrides everything and stops all scheduled
+workflows. The nightly and weekly flags independently disable those Financial
+Center schedules across every household.
 
-Before public launch: obtain legal review of investment-advice positioning, add a privacy policy and data retention controls, encrypt any future Plaid access tokens with a managed key, add audit logging, add provider-specific market-data attribution, and complete penetration/security testing.
+## Rollback
 
+```bash
+git apply -R nirvana-agent-scheduler-controls.patch
+```
 
-## Documentation
-
-- `docs/PHASE1_PRODUCT_DECISION.md` — what ships now and what is intentionally deferred
-- `docs/PLAID_PHASE2.md` — production Plaid architecture and security requirements
-- `docs/DEPLOYMENT_EXISTING_NGINX.md` — exact deployment for the existing AthenaBot Nginx/PM2/PostgreSQL/Certbot server
-- `docs/BUILD_VALIDATION.md` — tests and smoke checks completed
-- `docs/NIRVANA_0.4.0.md` — blue dashboard, loan schedules, linked cash flows, and holdings forecasts
+If the migration has already run, leaving the new table in place is harmless.
