@@ -183,3 +183,13 @@ export interface NewsItem {
   url: string;
   datetime: number;
 }
+
+export interface MarketContext {
+  asOf: string;
+  indices: { symbol: string; name: string; changePct: number }[];
+  sectors: { etf: string; name: string; changePct: number }[];
+  headlines: { headline: string; source: string }[];
+  breadth: "risk-on" | "mixed" | "risk-off";
+  leaders: string[];   // leading sectors today
+  laggards: string[];  // lagging sectors today
+}

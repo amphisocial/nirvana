@@ -95,6 +95,29 @@ restarts as long as `NEXTAUTH_SECRET` stays the same. Saved portfolios are
 stored with the owner's email and appear under **My portfolios**.
 
 
+
+## The recipe (how a portfolio is built)
+
+When live (model + market provider configured), each build:
+
+1. **Reads today's market** — index moves, sector rotation across 11 sector ETFs,
+   and the morning's headlines — before naming a single stock.
+2. **Proposes candidates from the whole market** — the research agent names ~16
+   tickers grounded in today's conditions and the client's profile (not a fixed
+   list), each **validated live** against the data provider; unresolved/foreign
+   names are dropped.
+3. **Writes research + scores risk** on the validated set.
+4. **Runs a multi-round knockout debate** — 5–6 rounds, each pressure-testing a
+   different angle (valuation, crowding, cyclicality, momentum vs. the tape…) and
+   eliminating the weakest name(s), until a shortlist survives.
+5. **Constructs and backtests** the book on the survivors.
+
+Every step streams to the client as a live "desk feed," so the thinking is
+visible and the portfolio is not built in one second. Because this is real model
+work plus live data lookups, a live build typically takes ~30–60 seconds and can
+occasionally hit the Finnhub free-tier rate limit (it degrades gracefully). The
+intake also rotates its wording each session and adapts follow-ups to answers.
+
 ## What "real" requires (honest note)
 
 Out of the box the app runs a **deterministic simulation** — instant, offline,

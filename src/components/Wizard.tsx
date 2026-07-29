@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession, signIn } from "next-auth/react";
-import { nextQuestions, totalSteps, type Question } from "@/lib/questionnaire";
+import { nextQuestions, totalSteps, phraseFor, type Question } from "@/lib/questionnaire";
 import type { Answers, PortfolioRecord } from "@/lib/types";
 import { PERSONAS } from "@/lib/agents/personas";
 import { Avatar } from "./Avatar";
@@ -16,22 +16,24 @@ const byName: Record<string, keyof typeof PERSONAS> = {
   "Priya Nair": "optimizer",
 };
 
-type DeskEvent = { stage: string; line: string };
+type DeskEvent = { stage: string; line: string; kind?: "context" | "cut" | "info" };
 const AGENTS = ["researcher", "risk", "debater", "tester", "optimizer"] as const;
 // which stream stage marks each agent's work complete
 const AGENT_DONE: Record<string, string> = {
   researcher: "research",
   risk: "risk",
-  debater: "debate",
+  debater: "debate_done",
   tester: "backtest",
   optimizer: "optimize",
 };
+const PIPELINE = ["research", "risk", "debate_done", "optimize", "backtest"];
 
 export function Wizard() {
   const router = useRouter();
   const search = useSearchParams();
   const { status } = useSession();
   const [resuming, setResuming] = useState(search.get("resume") === "1");
+  const [seed] = useState(() => Math.floor(Math.random() * 100000));
   const [answers, setAnswers] = useState<Partial<Answers>>({});
   const [multi, setMulti] = useState<string[]>([]);
   const [phase, setPhase] = useState<"interview" | "working" | "done">("interview");
@@ -54,34 +56,51 @@ export function Wizard() {
     setMulti([]);
   }
 
-  function pushLine(stage: string, line: string) {
-    setLog((l) => [...l, { stage, line }]);
+  function pushLine(stage: string, line: string, kind?: DeskEvent["kind"]) {
+    setLog((l) => [...l, { stage, line, kind }]);
     setDoneStages((s) => new Set(s).add(stage));
   }
 
-  // Consume the NDJSON stream — every line is a REAL stage result as it lands.
-  function describe(e: any): string {
+  // Consume the NDJSON stream — every line is a REAL step as it lands.
+  function describe(e: any): { line: string; kind?: DeskEvent["kind"] } | null {
     switch (e.stage) {
-      case "screen":
-        return `Screened NASDAQ + NYSE → ${e.symbols.length} candidates: ${e.symbols.slice(0, 8).join(", ")}${e.symbols.length > 8 ? "…" : ""}`;
+      case "context_start":
+        return { line: "Reading today's tape — indices, sector rotation, and the morning's headlines…", kind: "context" };
+      case "context": {
+        const heads = (e.headlines || []).slice(0, 2).join(" · ");
+        return {
+          line: `Market is ${e.breadth}. Leading: ${e.leaders.join(", ")}. Lagging: ${e.laggards.join(", ")}.${heads ? ` Headlines: ${heads}` : ""}`,
+          kind: "context",
+        };
+      }
+      case "propose_start":
+        return { line: "Maya is scanning the market for candidates that fit today's setup and your profile…", kind: "info" };
+      case "propose":
+        return { line: `Proposed ${e.count} candidates${e.fallback ? " (built-in screen)" : " from across the market"}: ${e.symbols.slice(0, 10).join(", ")}${e.symbols.length > 10 ? "…" : ""}` };
+      case "validate":
+        return { line: `Validated on the live terminal → ${e.kept.length} confirmed${e.dropped.length ? `, dropped ${e.dropped.length} (${e.dropped.slice(0, 4).join(", ")}${e.dropped.length > 4 ? "…" : ""})` : ""}.` };
       case "research": {
         const c = (t: string) => e.notes.filter((n: any) => n.growthTier === t).length;
-        return `Maya wrote ${e.notes.length} theses — ${c("high")} high-growth, ${c("medium")} medium, ${c("low")} low.`;
+        return { line: `Maya wrote ${e.notes.length} theses — ${c("high")} high-growth, ${c("medium")} medium, ${c("low")} low.` };
       }
       case "risk": {
         const avg = Math.round(e.risk.reduce((a: number, r: any) => a + r.volatility, 0) / e.risk.length);
-        return `Marcus scored risk on ${e.risk.length} names — average volatility ~${avg}%.`;
+        return { line: `Marcus scored risk on ${e.risk.length} names — average volatility ~${avg}%.` };
       }
-      case "debate": {
-        const top = [...e.debate].sort((a: any, b: any) => b.score - a.score)[0];
-        return `Sofia ran the bull vs bear — highest net conviction ${top.symbol} (+${top.score}).`;
+      case "debate_start":
+        return { line: `Sofia opens the debate — ${e.starting} names enter the knockout.`, kind: "info" };
+      case "debate_round": {
+        const cuts = (e.cut || []).map((c: any) => `${c.symbol} (${c.reason})`).join("; ");
+        return { line: `Round ${e.round}/${e.totalRounds} — ${e.focus}. Cut ${cuts}. ${e.remaining.length} remain.`, kind: "cut" };
       }
+      case "debate_done":
+        return { line: `Debate settled. Survivors: ${e.survivors.join(", ")}.` };
       case "optimize":
-        return `Priya set weights across ${e.holdings.length} positions.`;
+        return { line: `Priya sized ${e.holdings.length} positions into the final book.` };
       case "backtest":
-        return `Ethan backtested vs the S&P 500 → ${e.totalReturnPct}% vs ${e.benchmarkReturnPct}%.`;
+        return { line: `Ethan backtested vs the S&P 500 → ${e.totalReturnPct}% vs ${e.benchmarkReturnPct}%.` };
       default:
-        return "";
+        return null;
     }
   }
 
@@ -111,13 +130,13 @@ export function Wizard() {
           if (!line) continue;
           const e = JSON.parse(line);
           if (e.stage === "error") throw new Error(e.error);
-          if (e.stage === "screen") setEngine(e.engine);
+          if (e.stage === "begin") setEngine(e.engine);
           if (e.stage === "done") {
             setRecord(e.record);
             setPhase("done");
           } else {
-            const text = describe(e);
-            if (text) pushLine(e.stage, text);
+            const d = describe(e);
+            if (d) pushLine(e.stage, d.line, d.kind);
           }
         }
       }
@@ -202,9 +221,7 @@ export function Wizard() {
     const agentStatus = (id: string) => {
       const stage = AGENT_DONE[id];
       if (doneStages.has(stage)) return "done";
-      // the "current" agent is the first not-yet-done in pipeline order
-      const order = ["research", "risk", "debate", "optimize", "backtest"];
-      const firstPending = order.find((s) => !doneStages.has(s));
+      const firstPending = PIPELINE.find((s) => !doneStages.has(s));
       return stage === firstPending ? "active" : "queued";
     };
     return (
@@ -242,21 +259,28 @@ export function Wizard() {
           {/* live desk log — real results as they arrive */}
           <div className="mt-6 rounded-xl2 border border-lineDark bg-forest2 p-4 font-mono text-[13px] text-ivory/90">
             <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-widest text-ivory/50">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gain" /> Desk feed
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gain" /> Desk feed · live thinking
             </div>
-            <div className="space-y-1.5">
+            <div className="term-scroll max-h-[340px] space-y-1.5 overflow-y-auto">
               {log.length === 0 && <div className="text-ivory/50">Connecting to the desk…</div>}
               {log.map((e, i) => (
                 <div key={i} className="flex gap-2">
-                  <span className="text-brass2">›</span>
-                  <span>{e.line}</span>
+                  <span className={e.kind === "cut" ? "text-loss" : e.kind === "context" ? "text-brass2" : "text-brass2"}>
+                    {e.kind === "cut" ? "✕" : "›"}
+                  </span>
+                  <span className={e.kind === "context" ? "text-ivory/70" : ""}>{e.line}</span>
                 </div>
               ))}
               {phase === "working" && log.length > 0 && !doneStages.has("backtest") && (
-                <div className="flex gap-2 text-ivory/50"><span className="text-brass2">›</span><span className="animate-pulse">working…</span></div>
+                <div className="flex gap-2 text-ivory/50"><span className="text-brass2">›</span><span className="animate-pulse">thinking…</span></div>
               )}
             </div>
           </div>
+          <p className="mt-3 text-center font-mono text-[11px] text-sage">
+            {engine === "simulated"
+              ? "Demo mode — rule-based, so it's fast."
+              : "This runs live: reading today's market, proposing names, and debating them out. It takes as long as real analysis takes."}
+          </p>
         </div>
       </div>
     );
@@ -318,7 +342,7 @@ export function Wizard() {
                 <div className="font-mono text-[11px] uppercase tracking-wider text-sage">{persona.title}</div>
               </div>
             </div>
-            <h2 className="mt-6 font-display text-2xl font-black leading-tight">{q.prompt}</h2>
+            <h2 className="mt-6 font-display text-2xl font-extrabold leading-tight">{phraseFor(q.id, q.prompt, seed)}</h2>
             {q.help && <p className="mt-2 text-sm text-sage">{q.help}</p>}
 
             <div className="mt-6">

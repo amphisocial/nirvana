@@ -182,3 +182,65 @@ export function interviewComplete(a: Partial<Answers>): a is Answers {
 export function totalSteps(): number {
   return 9; // upper bound used for the progress bar
 }
+
+// Multiple phrasings per question so the intake feels different every session.
+// Values/ids are unchanged — only wording rotates — so the engine still gets
+// exactly what it needs.
+const PHRASINGS: Record<string, string[]> = {
+  amount: [
+    "How much are you looking to put to work?",
+    "What size of investment are we building around?",
+    "How much capital should the desk manage for you?",
+  ],
+  horizon: [
+    "When do you expect to need this money?",
+    "What's your time horizon for this money?",
+    "How long can this stay invested before you'd touch it?",
+  ],
+  goal: [
+    "What's the job of this money?",
+    "What are you trying to get out of this portfolio?",
+    "What should this money do for you?",
+  ],
+  riskComfort: [
+    "If this portfolio dropped 20% in a month, what would you do?",
+    "Markets fall sometimes. If you were down 20% quickly, how would you react?",
+    "Picture a fast 20% drop in this account — what's your honest move?",
+  ],
+  drawdownTolerance: [
+    "What's the deepest paper loss you could hold through?",
+    "How far could this fall before you'd lose sleep?",
+    "What temporary loss could you actually sit through?",
+  ],
+  experience: [
+    "How would you describe your investing experience?",
+    "How much investing have you done before?",
+    "Where would you put your experience level?",
+  ],
+  sectors: [
+    "Any sectors you especially want — or want to avoid?",
+    "Are there parts of the market you're drawn to, or want to steer clear of?",
+    "Any industries you'd like the desk to lean into or skip?",
+  ],
+  esg: [
+    "Should the desk lean toward sustainable / ESG-friendly names?",
+    "Do you want a tilt toward responsible / sustainable companies?",
+    "Any preference for ESG-conscious holdings?",
+  ],
+  incomeNeed: [
+    "Do you need to draw this income now, or reinvest it?",
+    "Should the income be paid out to you, or put back to work?",
+  ],
+  existingConcentration: [
+    "Do you already hold a lot of any one thing?",
+    "Is a big chunk of your wealth already tied up in one place?",
+  ],
+};
+
+// Deterministic pick from a per-session seed so wording is stable within a
+// session but varies across sessions.
+export function phraseFor(id: string, prompt: string, seed: number): string {
+  const pool = PHRASINGS[id];
+  if (!pool || !pool.length) return prompt;
+  return pool[Math.abs(seed + id.length * 7) % pool.length];
+}

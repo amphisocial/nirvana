@@ -7,6 +7,7 @@ import type {
   Fundamentals,
   GrowthTier,
   Holding,
+  MarketContext,
   ResearchNote,
   RiskAssessment,
   RiskTier,
@@ -16,6 +17,7 @@ import { askJson, ask } from "@/lib/anthropic";
 import { systemFor } from "./prompts";
 import { universe, findMeta } from "@/lib/market/universe";
 import { resolveFundamentals } from "@/lib/market/symbols";
+import { gatherContext, contextBrief } from "@/lib/market/context";
 import {
   annualizedVol,
   getHistory,
@@ -59,6 +61,72 @@ export function selectCandidates(a: Answers, n = 12): Fundamentals[] {
     .map((x) => x.f);
 }
 
+// Run async fn over items with bounded concurrency (respects API rate limits).
+async function mapPool<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = [];
+  let i = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) {
+      const idx = i++;
+      out[idx] = await fn(items[idx]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+// The research analyst proposes a broad candidate set drawn from the WHOLE US
+// market (not a fixed list), grounded in the client's profile and today's real
+// conditions. Each proposed ticker is then validated/enriched against live data.
+export async function proposeCandidates(
+  a: Answers,
+  ctx: MarketContext,
+  emit?: (e: any) => void
+): Promise<Fundamentals[]> {
+  let symbols: string[] = [];
+
+  if (config.ai.enabled) {
+    try {
+      const out = await askJson<{ candidates: { symbol: string; reason: string }[] }>(
+        systemFor("researcher"),
+        `${contextBrief(ctx)}
+
+CLIENT: ${clientLine(a)}.
+
+Propose 16 US-listed (NYSE/NASDAQ) stock candidates to research for THIS client given TODAY's conditions above. Requirements:
+- Spread across at least 6 sectors; deliberately include some non-obvious mid-caps, not only mega-caps.
+- Reflect today's rotation and news where relevant (lean into leading themes, be cautious on laggards).
+- Match the client's goal/horizon/risk (e.g. growth → higher-beta leaders; income → durable dividend payers; preserve → low-beta defensives).
+- Use real, currently-listed tickers only.
+Return {"candidates":[{"symbol":"TICKER","reason":"one line tied to today"}]}.`,
+        1800
+      );
+      symbols = (out.candidates || []).map((c) => c.symbol.toUpperCase().trim()).filter(Boolean);
+      if (emit) emit({ stage: "propose", count: symbols.length, symbols });
+    } catch {
+      /* fall through to curated */
+    }
+  }
+
+  if (!symbols.length) {
+    const curated = selectCandidates(a, 14).map((f) => f.symbol);
+    symbols = curated;
+    if (emit) emit({ stage: "propose", count: symbols.length, symbols, fallback: true });
+  }
+
+  // Validate + enrich each ticker against live data; drop anything unresolved.
+  const resolved = await mapPool(symbols, 4, (s) => resolveFundamentals(s).catch(() => null));
+  const kept: Fundamentals[] = [];
+  const dropped: string[] = [];
+  resolved.forEach((f, i) => (f ? kept.push(f) : dropped.push(symbols[i])));
+  if (emit) emit({ stage: "validate", kept: kept.map((k) => k.symbol), dropped });
+
+  // De-dup and cap.
+  const seen = new Set<string>();
+  const unique = kept.filter((k) => (seen.has(k.symbol) ? false : (seen.add(k.symbol), true)));
+  return unique.slice(0, 14);
+}
+
 // ─────────────────────────────────────────────────────────────
 // Classifiers (deterministic, always available)
 // ─────────────────────────────────────────────────────────────
@@ -77,7 +145,11 @@ function riskTierFrom(vol: number, beta: number): RiskTier {
 // ─────────────────────────────────────────────────────────────
 // AGENT 1 — Research
 // ─────────────────────────────────────────────────────────────
-export async function research(cands: Fundamentals[], a: Answers): Promise<ResearchNote[]> {
+export async function research(
+  cands: Fundamentals[],
+  a: Answers,
+  ctx?: MarketContext
+): Promise<ResearchNote[]> {
   const base: ResearchNote[] = cands.map((f) => ({
     symbol: f.symbol,
     name: f.name,
@@ -99,7 +171,7 @@ export async function research(cands: Fundamentals[], a: Answers): Promise<Resea
       .join("\n");
     const out = await askJson<{ notes: ResearchNote[] }>(
       systemFor("researcher"),
-      `Client: ${clientLine(a)}.\nWrite a research note for each name below. For each, give a 1–2 sentence thesis, 2–3 catalysts, 2 risks, a growthTier of "high"|"medium"|"low", and a conviction 0–100.\nReturn {"notes":[{symbol,name,sector,thesis,catalysts:[],risks:[],growthTier,conviction}]}.\n\n${facts}`,
+      `${ctx ? contextBrief(ctx) + "\n\n" : ""}Client: ${clientLine(a)}.\nWrite a research note for each name below, informed by today's conditions above. For each, give a 1–2 sentence thesis, 2–3 catalysts, 2 risks, a growthTier of "high"|"medium"|"low", and a conviction 0–100.\nReturn {"notes":[{symbol,name,sector,thesis,catalysts:[],risks:[],growthTier,conviction}]}.\n\n${facts}`,
       2600
     );
     // merge: keep code-derived symbol/sector, take model narrative
@@ -190,7 +262,97 @@ export async function debate(
 }
 
 // ─────────────────────────────────────────────────────────────
-// AGENT 5 — Optimizer (build the book). Numbers in code.
+// AGENT 3 (deep) — Iterative debate. Runs 5–6 rounds, each round
+// arguing a theme and eliminating the weakest name(s), until a
+// shortlist survives. Every round is streamed to the client.
+// ─────────────────────────────────────────────────────────────
+export async function iterativeDebate(
+  notes: ResearchNote[],
+  risks: RiskAssessment[],
+  a: Answers,
+  ctx: MarketContext | undefined,
+  emit: (e: any) => void
+): Promise<{ survivors: ResearchNote[]; verdicts: DebateVerdict[] }> {
+  const riskById = new Map(risks.map((r) => [r.symbol, r]));
+  const composite = (n: ResearchNote) => {
+    const r = riskById.get(n.symbol);
+    const cautious = a.riskComfort === "low" || a.goal === "preserve";
+    return n.conviction - (r ? r.riskScore * (cautious ? 0.6 : 0.3) : 15);
+  };
+
+  let remaining = [...notes].sort((x, y) => composite(y) - composite(x));
+  const target = a.riskComfort === "high" ? 6 : 7;
+  const maxRounds = 6;
+  let round = 0;
+
+  while (remaining.length > target && round < maxRounds) {
+    round++;
+    const toCut = Math.min(remaining.length > target + 2 ? 2 : 1, remaining.length - target);
+    let focus = "";
+    let cuts: { symbol: string; reason: string }[] = [];
+
+    if (config.ai.enabled) {
+      try {
+        const table = remaining
+          .map((n) => {
+            const r = riskById.get(n.symbol);
+            return `${n.symbol} (${n.name}, ${n.sector}) — ${n.growthTier} growth, conviction ${n.conviction}, risk ${r?.riskTier ?? "?"}/${r?.riskScore ?? "?"}. Thesis: ${n.thesis}`;
+          })
+          .join("\n");
+        const out = await askJson<{ focus: string; cut: { symbol: string; reason: string }[] }>(
+          systemFor("debater"),
+          `${ctx ? contextBrief(ctx) + "\n\n" : ""}This is debate round ${round} of a knockout process for a ${a.goal} client (${a.riskComfort} risk, ${a.horizon}-term).
+Candidates still standing:
+${table}
+
+Pick a specific angle to pressure-test this round (valuation, crowding, cyclicality, balance-sheet, momentum vs. today's tape, etc.), then eliminate the ${toCut} weakest name(s) on that angle with a concrete reason each. Do not cut on generic grounds.
+Return {"focus":"the angle","cut":[{"symbol":"X","reason":"why it loses this round"}]}.`,
+          700
+        );
+        focus = out.focus || "";
+        cuts = (out.cut || []).slice(0, toCut);
+      } catch {
+        /* fall to deterministic */
+      }
+    }
+
+    if (!cuts.length) {
+      const weakest = [...remaining].sort((x, y) => composite(x) - composite(y)).slice(0, toCut);
+      focus = deterministicFocus(round);
+      cuts = weakest.map((n) => ({
+        symbol: n.symbol,
+        reason: `weakest on ${focus.toLowerCase()} — conviction ${n.conviction} against its risk profile`,
+      }));
+    }
+
+    const cutSet = new Set(cuts.map((c) => c.symbol));
+    remaining = remaining.filter((n) => !cutSet.has(n.symbol));
+    emit({
+      stage: "debate_round",
+      round,
+      totalRounds: maxRounds,
+      focus,
+      cut: cuts,
+      remaining: remaining.map((n) => n.symbol),
+    });
+  }
+
+  // Final verdicts for the survivors (reuse the single-pass debate).
+  const verdicts = await debate(remaining, risks);
+  return { survivors: remaining, verdicts };
+}
+
+function deterministicFocus(round: number): string {
+  return [
+    "Valuation vs. growth",
+    "Balance-sheet and cash generation",
+    "Crowding and positioning",
+    "Cyclicality and macro sensitivity",
+    "Momentum against today's tape",
+    "Risk-adjusted conviction",
+  ][(round - 1) % 6];
+}
+
 // ─────────────────────────────────────────────────────────────
 export async function optimize(
   notes: ResearchNote[],
@@ -399,30 +561,47 @@ export async function runFirm(a: Answers) {
 // faked or delayed.
 export async function runFirmStream(a: Answers, emit: (e: any) => void) {
   const engine = engineName();
-  const cands = selectCandidates(a);
-  emit({ stage: "screen", engine, symbols: cands.map((c) => c.symbol) });
+  emit({ stage: "begin", engine });
 
-  const notes = await research(cands, a);
+  // 1) Read today's real market before thinking about a single name.
+  emit({ stage: "context_start" });
+  const ctx = await gatherContext();
+  emit({
+    stage: "context",
+    breadth: ctx.breadth,
+    leaders: ctx.leaders,
+    laggards: ctx.laggards,
+    indices: ctx.indices,
+    headlines: ctx.headlines.slice(0, 4).map((h) => h.headline),
+  });
+
+  // 2) Research proposes candidates from the whole market; validate live.
+  emit({ stage: "propose_start" });
+  const cands = await proposeCandidates(a, ctx, emit);
+  if (!cands.length) throw new Error("No candidates could be validated. Try again in a moment.");
+
+  // 3) Full research notes on the validated set.
+  const notes = await research(cands, a, ctx);
   emit({
     stage: "research",
-    notes: notes.map((n) => ({ symbol: n.symbol, name: n.name, growthTier: n.growthTier, conviction: n.conviction })),
+    notes: notes.map((n) => ({ symbol: n.symbol, name: n.name, sector: n.sector, growthTier: n.growthTier, conviction: n.conviction })),
   });
 
+  // 4) Risk desk scores each name on live parameters.
   const risks = await riskReview(cands);
-  emit({
-    stage: "risk",
-    risk: risks.map((r) => ({ symbol: r.symbol, riskTier: r.riskTier, volatility: r.volatility })),
-  });
+  emit({ stage: "risk", risk: risks.map((r) => ({ symbol: r.symbol, riskTier: r.riskTier, volatility: r.volatility, riskScore: r.riskScore })) });
 
-  const verdicts = await debate(notes, risks);
-  emit({ stage: "debate", debate: verdicts.map((d) => ({ symbol: d.symbol, score: d.score })) });
+  // 5) Multi-round knockout debate (streams each round).
+  emit({ stage: "debate_start", starting: notes.length });
+  const { survivors, verdicts } = await iterativeDebate(notes, risks, a, ctx, emit);
+  emit({ stage: "debate_done", survivors: survivors.map((s) => s.symbol) });
 
-  const allocation = await optimize(notes, risks, a);
-  emit({
-    stage: "optimize",
-    holdings: allocation.holdings.map((h) => ({ symbol: h.symbol, weight: h.weight })),
-  });
+  // 6) Construction on the survivors only.
+  const survivorNotes = survivors.length ? survivors : notes;
+  const allocation = await optimize(survivorNotes, risks, a);
+  emit({ stage: "optimize", holdings: allocation.holdings.map((h) => ({ symbol: h.symbol, weight: h.weight })) });
 
+  // 7) Backtest the finished book.
   const bt = await backtest(allocation);
   emit({ stage: "backtest", totalReturnPct: bt.totalReturnPct, benchmarkReturnPct: bt.benchmarkReturnPct });
 
