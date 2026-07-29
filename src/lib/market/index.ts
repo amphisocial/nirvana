@@ -4,6 +4,7 @@ import { mockHistory, mockNews, mockQuote } from "./mock";
 import { finnhubHistory, finnhubNews, finnhubQuote } from "./finnhub";
 import { avHistory, avNews, avQuote } from "./alphavantage";
 import { universe } from "./universe";
+import { cached } from "./cache";
 
 // Which live provider (if any) is active. Anything unrecognized → mock.
 type Live = "finnhub" | "alphavantage" | null;
@@ -15,17 +16,21 @@ function liveProvider(): Live {
 }
 
 export async function getQuote(symbol: string): Promise<Quote> {
-  const p = liveProvider();
-  if (p === "finnhub") return finnhubQuote(symbol);
-  if (p === "alphavantage") return avQuote(symbol);
-  return mockQuote(symbol);
+  return cached(`q:${symbol}`, 120000, async () => {
+    const p = liveProvider();
+    if (p === "finnhub") return finnhubQuote(symbol);
+    if (p === "alphavantage") return avQuote(symbol);
+    return mockQuote(symbol);
+  });
 }
 
 export async function getHistory(symbol: string, days = 1260): Promise<Candle[]> {
-  const p = liveProvider();
-  if (p === "finnhub") return finnhubHistory(symbol, days);
-  if (p === "alphavantage") return avHistory(symbol, days);
-  return mockHistory(symbol, days);
+  return cached(`h:${symbol}:${days}`, 120000, async () => {
+    const p = liveProvider();
+    if (p === "finnhub") return finnhubHistory(symbol, days);
+    if (p === "alphavantage") return avHistory(symbol, days);
+    return mockHistory(symbol, days);
+  });
 }
 
 export async function getNews(limit = 3): Promise<NewsItem[]> {

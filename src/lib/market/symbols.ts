@@ -1,6 +1,7 @@
 import type { Fundamentals } from "@/lib/types";
 import { config } from "@/lib/config";
 import { findMeta } from "./universe";
+import { throttle, cached } from "./cache";
 
 // Resolve fundamentals for ANY US-listed ticker — not just the curated list.
 // Order: curated table (instant, offline) → live provider profile → null.
@@ -9,6 +10,10 @@ import { findMeta } from "./universe";
 export async function resolveFundamentals(symbolRaw: string): Promise<Fundamentals | null> {
   const symbol = symbolRaw.trim().toUpperCase();
   if (!symbol) return null;
+  return cached(`fund:${symbol}`, 600000, () => resolveInner(symbol));
+}
+
+async function resolveInner(symbol: string): Promise<Fundamentals | null> {
 
   const curated = findMeta(symbol);
   if (curated) return curated;
@@ -33,8 +38,8 @@ async function finnhubResolve(symbol: string): Promise<Fundamentals | null> {
     const base = "https://finnhub.io/api/v1";
     const key = config.market.finnhubKey;
     const [pRes, mRes] = await Promise.all([
-      fetch(`${base}/stock/profile2?symbol=${symbol}&token=${key}`),
-      fetch(`${base}/stock/metric?symbol=${symbol}&metric=all&token=${key}`),
+      throttle(1050, () => fetch(`${base}/stock/profile2?symbol=${symbol}&token=${key}`)),
+      throttle(1050, () => fetch(`${base}/stock/metric?symbol=${symbol}&metric=all&token=${key}`)),
     ]);
     const profile = await pRes.json();
     if (!profile || !profile.name) return null; // unknown ticker
@@ -61,7 +66,7 @@ async function finnhubResolve(symbol: string): Promise<Fundamentals | null> {
 async function avResolve(symbol: string): Promise<Fundamentals | null> {
   try {
     const url = `https://www.alphavantage.co/query?function=OVERVIEW&symbol=${symbol}&apikey=${config.market.alphavantageKey}`;
-    const d = await (await fetch(url)).json();
+    const d = await (await throttle(1050, () => fetch(url))).json();
     if (!d || !d.Name || d.Note || d.Information) return null;
     const beta = num(d.Beta) ?? 1;
     return {

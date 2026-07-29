@@ -2,6 +2,7 @@ import type { Candle, NewsItem, Quote } from "@/lib/types";
 import { config } from "@/lib/config";
 import { findMeta } from "./universe";
 import { mockHistory, mockNews, mockQuote } from "./mock";
+import { throttle } from "./cache";
 
 const BASE = "https://finnhub.io/api/v1";
 
@@ -9,7 +10,7 @@ async function fh(path: string, params: Record<string, string | number>) {
   const url = new URL(BASE + path);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
   url.searchParams.set("token", config.market.finnhubKey);
-  const res = await fetch(url.toString(), { next: { revalidate: 60 } });
+  const res = await throttle(1050, () => fetch(url.toString(), { next: { revalidate: 60 } }));
   if (!res.ok) throw new Error(`Finnhub ${res.status}`);
   return res.json();
 }

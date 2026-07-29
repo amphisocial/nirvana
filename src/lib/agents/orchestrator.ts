@@ -95,7 +95,7 @@ export async function proposeCandidates(
 
 CLIENT: ${clientLine(a)}.
 
-Propose 16 US-listed (NYSE/NASDAQ) stock candidates to research for THIS client given TODAY's conditions above. Requirements:
+Propose 14 US-listed (NYSE/NASDAQ) stock candidates to research for THIS client given TODAY's conditions above. Requirements:
 - Spread across at least 6 sectors; deliberately include some non-obvious mid-caps, not only mega-caps.
 - Reflect today's rotation and news where relevant (lean into leading themes, be cautious on laggards).
 - Match the client's goal/horizon/risk (e.g. growth → higher-beta leaders; income → durable dividend payers; preserve → low-beta defensives).
@@ -126,7 +126,7 @@ Return {"candidates":[{"symbol":"TICKER","reason":"one line tied to today"}]}.`,
   // De-dup and cap.
   const seen = new Set<string>();
   const unique = kept.filter((k) => (seen.has(k.symbol) ? false : (seen.add(k.symbol), true)));
-  return unique.slice(0, 14);
+  return unique.slice(0, 12);
 }
 
 // ─────────────────────────────────────────────────────────────
