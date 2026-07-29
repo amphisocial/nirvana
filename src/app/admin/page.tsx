@@ -1,16 +1,19 @@
 import { config } from "@/lib/config";
+import { marketHealth } from "@/lib/market/health";
 import { NightlyTrigger } from "@/components/AdminControls";
 import { SectionLabel } from "@/components/ui";
 export const dynamic = "force-dynamic";
 
-export default function AdminPage() {
+export default async function AdminPage() {
+  const health = await marketHealth();
   const marketLive =
     (config.market.provider === "finnhub" && !!config.market.finnhubKey) ||
     (config.market.provider === "alphavantage" && !!config.market.alphavantageKey);
   const rows: [string, string, boolean][] = [
     ["Agent engine", config.ai.enabled ? `${config.ai.provider} (live)` : "Simulation (no key)", config.ai.enabled],
     ["AI model", config.ai.enabled ? config.ai.model : "—", config.ai.enabled],
-    ["Market data", `${config.market.provider}${marketLive ? " (live)" : " (mock)"}`, marketLive],
+    ["Market data", `${config.market.provider}${marketLive ? " (configured)" : " (mock)"}`, marketLive],
+    ["Live data check", health.ok ? `OK — ${health.detail}` : `NOT LIVE — ${health.detail}`, health.ok],
     ["Listing universe", config.market.listing.toUpperCase(), true],
     ["Nightly blog run", config.nightly.enabled ? "ENABLED" : "DISABLED", config.nightly.enabled],
     ["Cron secret set", config.nightly.secret ? "yes" : "no", !!config.nightly.secret],
@@ -38,6 +41,16 @@ export default function AdminPage() {
 
       <div className="mt-8"><SectionLabel n="—">Nightly run</SectionLabel></div>
       <div className="mt-4"><NightlyTrigger secretRequired={!!config.nightly.secret} /></div>
+
+      <div className="mt-8 rounded-xl2 border border-brass/30 bg-brass/5 p-5 text-sm text-ink/80">
+        <div className="eyebrow mb-2">How "live" actually works</div>
+        <p>When <strong>Live data check</strong> is OK, quotes, movers, news and single-ticker lookups are real.
+        If it says NOT LIVE, the app silently falls back to synthetic data even though a key is set — usually a
+        blocked outbound connection, an invalid key, or a rate limit.</p>
+        <p className="mt-2">Note: the <strong>portfolio builder screens a curated candidate list</strong> (large/mid-cap
+        NASDAQ + NYSE names), then prices and analyzes them with live data. It does not scan the entire market on
+        every request. Single-agent lookups (the Agents page) resolve <em>any</em> real US ticker via the provider.</p>
+      </div>
 
       <div className="mt-8 rounded-xl2 border border-line bg-ivory2/50 p-5 text-sm text-ink/70">
         <div className="eyebrow mb-2">Schedule it</div>

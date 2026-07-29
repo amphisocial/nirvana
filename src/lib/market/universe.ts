@@ -64,6 +64,27 @@ const U: Row[] = [
   // Utilities / Real Estate (defensive ballast)
   { symbol: "NEE", name: "NextEra Energy", sector: "Utilities", listing: "NYSE", marketCap: 160, pe: 21, dividendYield: 2.9, beta: 0.5 },
   { symbol: "AMT", name: "American Tower", sector: "Real Estate", listing: "NYSE", marketCap: 100, pe: 40, dividendYield: 3.2, beta: 0.7 },
+
+  // Growth / mid-cap (less "famous mega-cap", more variety)
+  { symbol: "NOW", name: "ServiceNow", sector: "Technology", listing: "NYSE", marketCap: 190, pe: 55, dividendYield: 0, beta: 1.1 },
+  { symbol: "PANW", name: "Palo Alto Networks", sector: "Technology", listing: "NASDAQ", marketCap: 120, pe: 48, dividendYield: 0, beta: 1.1 },
+  { symbol: "CRWD", name: "CrowdStrike", sector: "Technology", listing: "NASDAQ", marketCap: 95, pe: 70, dividendYield: 0, beta: 1.2 },
+  { symbol: "SNOW", name: "Snowflake", sector: "Technology", listing: "NYSE", marketCap: 55, pe: null, dividendYield: 0, beta: 1.1 },
+  { symbol: "PLTR", name: "Palantir", sector: "Technology", listing: "NASDAQ", marketCap: 110, pe: 60, dividendYield: 0, beta: 1.6 },
+  { symbol: "INTU", name: "Intuit", sector: "Technology", listing: "NASDAQ", marketCap: 180, pe: 40, dividendYield: 0.6, beta: 1.2 },
+  { symbol: "QCOM", name: "Qualcomm", sector: "Technology", listing: "NASDAQ", marketCap: 190, pe: 18, dividendYield: 2.1, beta: 1.3 },
+  { symbol: "MU", name: "Micron", sector: "Technology", listing: "NASDAQ", marketCap: 120, pe: 25, dividendYield: 0.5, beta: 1.4 },
+  { symbol: "ABNB", name: "Airbnb", sector: "Consumer Cyclical", listing: "NASDAQ", marketCap: 85, pe: 30, dividendYield: 0, beta: 1.2 },
+  { symbol: "SHOP", name: "Shopify", sector: "Technology", listing: "NASDAQ", marketCap: 130, pe: 65, dividendYield: 0, beta: 1.6 },
+  { symbol: "MRNA", name: "Moderna", sector: "Healthcare", listing: "NASDAQ", marketCap: 30, pe: null, dividendYield: 0, beta: 1.3 },
+  { symbol: "VRTX", name: "Vertex Pharma", sector: "Healthcare", listing: "NASDAQ", marketCap: 120, pe: 28, dividendYield: 0, beta: 0.6 },
+
+  // Income / value ballast (dividend-heavy, lower beta)
+  { symbol: "MO", name: "Altria", sector: "Consumer Defensive", listing: "NYSE", marketCap: 95, pe: 9, dividendYield: 7.8, beta: 0.6 },
+  { symbol: "DUK", name: "Duke Energy", sector: "Utilities", listing: "NYSE", marketCap: 90, pe: 19, dividendYield: 3.9, beta: 0.5 },
+  { symbol: "O", name: "Realty Income", sector: "Real Estate", listing: "NYSE", marketCap: 55, pe: 55, dividendYield: 5.4, beta: 0.8 },
+  { symbol: "LMT", name: "Lockheed Martin", sector: "Industrials", listing: "NYSE", marketCap: 110, pe: 18, dividendYield: 2.6, beta: 0.5 },
+  { symbol: "DE", name: "Deere & Co", sector: "Industrials", listing: "NYSE", marketCap: 115, pe: 16, dividendYield: 1.4, beta: 0.9 },
 ];
 
 export const SECTORS = Array.from(new Set(U.map((r) => r.sector))).sort();

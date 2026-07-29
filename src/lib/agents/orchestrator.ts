@@ -15,6 +15,7 @@ import { config, engineName } from "@/lib/config";
 import { askJson, ask } from "@/lib/anthropic";
 import { systemFor } from "./prompts";
 import { universe, findMeta } from "@/lib/market/universe";
+import { resolveFundamentals } from "@/lib/market/symbols";
 import {
   annualizedVol,
   getHistory,
@@ -392,10 +393,50 @@ export async function runFirm(a: Answers) {
   };
 }
 
+// Streaming pipeline: runs each agent SEQUENTIALLY and calls `emit` after each
+// stage completes, so the client can show real progress. When a real model is
+// configured the latency between events is genuine model work — nothing is
+// faked or delayed.
+export async function runFirmStream(a: Answers, emit: (e: any) => void) {
+  const engine = engineName();
+  const cands = selectCandidates(a);
+  emit({ stage: "screen", engine, symbols: cands.map((c) => c.symbol) });
+
+  const notes = await research(cands, a);
+  emit({
+    stage: "research",
+    notes: notes.map((n) => ({ symbol: n.symbol, name: n.name, growthTier: n.growthTier, conviction: n.conviction })),
+  });
+
+  const risks = await riskReview(cands);
+  emit({
+    stage: "risk",
+    risk: risks.map((r) => ({ symbol: r.symbol, riskTier: r.riskTier, volatility: r.volatility })),
+  });
+
+  const verdicts = await debate(notes, risks);
+  emit({ stage: "debate", debate: verdicts.map((d) => ({ symbol: d.symbol, score: d.score })) });
+
+  const allocation = await optimize(notes, risks, a);
+  emit({
+    stage: "optimize",
+    holdings: allocation.holdings.map((h) => ({ symbol: h.symbol, weight: h.weight })),
+  });
+
+  const bt = await backtest(allocation);
+  emit({ stage: "backtest", totalReturnPct: bt.totalReturnPct, benchmarkReturnPct: bt.benchmarkReturnPct });
+
+  return { engine, research: notes, risk: risks, debate: verdicts, allocation, backtest: bt };
+}
+
 // Run a single agent against one ticker (for the "talk to one" mode).
 export async function runSingleAgent(agentId: string, symbol: string, a?: Answers) {
-  const meta = findMeta(symbol);
-  if (!meta) throw new Error(`Unknown symbol ${symbol}`);
+  const meta = await resolveFundamentals(symbol);
+  if (!meta) {
+    throw new Error(
+      `Couldn't find "${symbol}" as a US-listed (NASDAQ/NYSE) stock. Check the ticker — and note that looking up names outside the built-in list requires a market data provider (Finnhub or Alpha Vantage) to be configured.`
+    );
+  }
   const answers: Answers = a ?? defaultAnswers();
   switch (agentId) {
     case "researcher":

@@ -94,6 +94,26 @@ Sessions are JWT cookies (no extra DB tables), so sign-in persists across
 restarts as long as `NEXTAUTH_SECRET` stays the same. Saved portfolios are
 stored with the owner's email and appear under **My portfolios**.
 
+
+## What "real" requires (honest note)
+
+Out of the box the app runs a **deterministic simulation** — instant, offline,
+and limited to a built-in list of names. That's a scaffold, not the product.
+For genuine research it behaves very differently once configured:
+
+- **A model provider** (`AI_PROVIDER` + key + matching `AI_MODEL`) makes the
+  agents actually reason. Stages then take real seconds and the desk feed streams
+  each analyst's output as it lands — no fake progress.
+- **A market data provider** (`MARKET_DATA_PROVIDER=finnhub` + key) lets the desk
+  resolve **any** US-listed ticker (not just the built-in list) with live
+  fundamentals, quotes, and news.
+
+Honest limits even when fully live: the desk screens a candidate set and then
+deep-dives it — it does not scan all ~6,000 US tickers on every request, because
+free data tiers rate-limit that. Broadening to a full live screen needs a paid
+market-data feed. And backtests are hypothetical; past results never guarantee
+future ones.
+
 ## Architecture
 
 ```

@@ -16,13 +16,16 @@ const byName: Record<string, keyof typeof PERSONAS> = {
   "Priya Nair": "optimizer",
 };
 
-const WORKING_STEPS = [
-  "Maya screens the NASDAQ + NYSE universe",
-  "Marcus stress-tests every candidate",
-  "Sofia runs the bull against the bear",
-  "Ethan backtests the plan vs the S&P 500",
-  "Priya assembles your book",
-];
+type DeskEvent = { stage: string; line: string };
+const AGENTS = ["researcher", "risk", "debater", "tester", "optimizer"] as const;
+// which stream stage marks each agent's work complete
+const AGENT_DONE: Record<string, string> = {
+  researcher: "research",
+  risk: "risk",
+  debater: "debate",
+  tester: "backtest",
+  optimizer: "optimize",
+};
 
 export function Wizard() {
   const router = useRouter();
@@ -32,10 +35,13 @@ export function Wizard() {
   const [answers, setAnswers] = useState<Partial<Answers>>({});
   const [multi, setMulti] = useState<string[]>([]);
   const [phase, setPhase] = useState<"interview" | "working" | "done">("interview");
-  const [workStep, setWorkStep] = useState(0);
+  const [log, setLog] = useState<DeskEvent[]>([]);
+  const [doneStages, setDoneStages] = useState<Set<string>>(new Set());
+  const [engine, setEngine] = useState<"ai" | "simulated" | null>(null);
   const [record, setRecord] = useState<PortfolioRecord | null>(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const started = useMemo(() => ({ current: false }), []);
 
   const queue = useMemo(() => nextQuestions(answers), [answers]);
   const q: Question | undefined = queue[0];
@@ -48,31 +54,85 @@ export function Wizard() {
     setMulti([]);
   }
 
-  async function build(next: Partial<Answers>) {
-    setPhase("working");
-    setError(null);
-    const timer = setInterval(() => setWorkStep((s) => Math.min(s + 1, WORKING_STEPS.length - 1)), 900);
-    try {
-      const res = await fetch("/api/portfolio/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers: next, save: false }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to build");
-      setRecord(data.record);
-      setPhase("done");
-    } catch (e: any) {
-      setError(e.message);
-      setPhase("interview");
-    } finally {
-      clearInterval(timer);
+  function pushLine(stage: string, line: string) {
+    setLog((l) => [...l, { stage, line }]);
+    setDoneStages((s) => new Set(s).add(stage));
+  }
+
+  // Consume the NDJSON stream — every line is a REAL stage result as it lands.
+  function describe(e: any): string {
+    switch (e.stage) {
+      case "screen":
+        return `Screened NASDAQ + NYSE → ${e.symbols.length} candidates: ${e.symbols.slice(0, 8).join(", ")}${e.symbols.length > 8 ? "…" : ""}`;
+      case "research": {
+        const c = (t: string) => e.notes.filter((n: any) => n.growthTier === t).length;
+        return `Maya wrote ${e.notes.length} theses — ${c("high")} high-growth, ${c("medium")} medium, ${c("low")} low.`;
+      }
+      case "risk": {
+        const avg = Math.round(e.risk.reduce((a: number, r: any) => a + r.volatility, 0) / e.risk.length);
+        return `Marcus scored risk on ${e.risk.length} names — average volatility ~${avg}%.`;
+      }
+      case "debate": {
+        const top = [...e.debate].sort((a: any, b: any) => b.score - a.score)[0];
+        return `Sofia ran the bull vs bear — highest net conviction ${top.symbol} (+${top.score}).`;
+      }
+      case "optimize":
+        return `Priya set weights across ${e.holdings.length} positions.`;
+      case "backtest":
+        return `Ethan backtested vs the S&P 500 → ${e.totalReturnPct}% vs ${e.benchmarkReturnPct}%.`;
+      default:
+        return "";
     }
   }
 
-  // when interview completes, kick off the build
+  async function build(next: Partial<Answers>) {
+    setPhase("working");
+    setError(null);
+    setLog([]);
+    setDoneStages(new Set());
+    try {
+      const res = await fetch("/api/portfolio/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers: next }),
+      });
+      if (!res.ok || !res.body) throw new Error("Couldn't reach the desk.");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!line) continue;
+          const e = JSON.parse(line);
+          if (e.stage === "error") throw new Error(e.error);
+          if (e.stage === "screen") setEngine(e.engine);
+          if (e.stage === "done") {
+            setRecord(e.record);
+            setPhase("done");
+          } else {
+            const text = describe(e);
+            if (text) pushLine(e.stage, text);
+          }
+        }
+      }
+    } catch (e: any) {
+      setError(e.message || "Something went wrong.");
+      setPhase("interview");
+    }
+  }
+
+  // when interview completes, kick off the build once
   const complete = queue.length === 0 && phase === "interview" && Object.keys(answers).length > 0;
-  if (complete) build(answers as Answers);
+  if (complete && !started.current) {
+    started.current = true;
+    build(answers as Answers);
+  }
 
   const PENDING_KEY = "nirvana:pendingPortfolio";
 
@@ -139,25 +199,63 @@ export function Wizard() {
 
   // ---------- WORKING ----------
   if (phase === "working") {
+    const agentStatus = (id: string) => {
+      const stage = AGENT_DONE[id];
+      if (doneStages.has(stage)) return "done";
+      // the "current" agent is the first not-yet-done in pipeline order
+      const order = ["research", "risk", "debate", "optimize", "backtest"];
+      const firstPending = order.find((s) => !doneStages.has(s));
+      return stage === firstPending ? "active" : "queued";
+    };
     return (
-      <div className="container-x py-24">
-        <div className="mx-auto max-w-lg text-center">
-          <div className="flex justify-center -space-x-3">
-            {(["researcher", "risk", "debater", "tester", "optimizer"] as const).map((id, i) => (
-              <div key={id} className="animate-pulse" style={{ animationDelay: `${i * 120}ms` }}>
-                <Avatar id={id} accent={PERSONAS[id].accent} size={48} />
-              </div>
-            ))}
+      <div className="container-x py-16">
+        <div className="mx-auto max-w-2xl">
+          <div className="text-center">
+            <h2 className="font-display text-2xl font-extrabold">The desk is working</h2>
+            <p className="mt-1 text-sm text-sage">
+              {engine === "simulated"
+                ? "Demo mode — a rule-based engine, so this is fast. Add a model provider for live research."
+                : "Each analyst reports in as they finish. This is live — it takes as long as the work takes."}
+            </p>
           </div>
-          <h2 className="mt-6 font-display text-2xl font-black">The desk is working</h2>
-          <p className="mt-1 text-sm text-sage">Five analysts, one portfolio. This takes a moment.</p>
-          <div className="mt-6 space-y-2 text-left">
-            {WORKING_STEPS.map((s, i) => (
-              <div key={i} className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-sm transition-colors ${i <= workStep ? "border-forest/30 bg-forest/5 text-ink" : "border-line text-sage"}`}>
-                <span className={`inline-block h-2 w-2 rounded-full ${i < workStep ? "bg-gain" : i === workStep ? "bg-brass animate-pulse" : "bg-line"}`} />
-                {s}
-              </div>
-            ))}
+
+          {/* agent status row */}
+          <div className="mt-8 grid grid-cols-5 gap-2">
+            {AGENTS.map((id) => {
+              const st = agentStatus(id);
+              return (
+                <div key={id} className={`flex flex-col items-center gap-2 rounded-xl border p-3 transition-colors ${st === "done" ? "border-gain/40 bg-gain/5" : st === "active" ? "border-brand/40 bg-brand/5" : "border-line"}`}>
+                  <div className={st === "active" ? "animate-pulse" : ""}>
+                    <Avatar id={id} accent={PERSONAS[id].accent} size={40} ring={st !== "queued"} />
+                  </div>
+                  <div className="text-center">
+                    <div className="text-[11px] font-medium leading-tight">{PERSONAS[id].name.split(" ").slice(-1)}</div>
+                    <div className={`font-mono text-[9px] uppercase ${st === "done" ? "text-gain" : st === "active" ? "text-brand" : "text-sage"}`}>
+                      {st === "done" ? "done" : st === "active" ? "working" : "queued"}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* live desk log — real results as they arrive */}
+          <div className="mt-6 rounded-xl2 border border-lineDark bg-forest2 p-4 font-mono text-[13px] text-ivory/90">
+            <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-widest text-ivory/50">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gain" /> Desk feed
+            </div>
+            <div className="space-y-1.5">
+              {log.length === 0 && <div className="text-ivory/50">Connecting to the desk…</div>}
+              {log.map((e, i) => (
+                <div key={i} className="flex gap-2">
+                  <span className="text-brass2">›</span>
+                  <span>{e.line}</span>
+                </div>
+              ))}
+              {phase === "working" && log.length > 0 && !doneStages.has("backtest") && (
+                <div className="flex gap-2 text-ivory/50"><span className="text-brass2">›</span><span className="animate-pulse">working…</span></div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -181,7 +279,7 @@ export function Wizard() {
             <button onClick={saveAndTrack} className="btn-brass" disabled={saved}>
               {saved ? "Saving…" : status === "authenticated" ? "Save & follow for a week" : "Sign in to save & follow"}
             </button>
-            <button onClick={() => { setAnswers({}); setRecord(null); setPhase("interview"); setWorkStep(0); }} className="btn-ghost">
+            <button onClick={() => { setAnswers({}); setRecord(null); setPhase("interview"); setLog([]); setDoneStages(new Set()); started.current = false; }} className="btn-ghost">
               Start over
             </button>
           </div>
