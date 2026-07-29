@@ -1,17 +1,19 @@
 import { config } from "@/lib/config";
 import { marketHealth } from "@/lib/market/health";
+import { aiHealth } from "@/lib/aihealth";
 import { NightlyTrigger } from "@/components/AdminControls";
 import { SectionLabel } from "@/components/ui";
 export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
-  const health = await marketHealth();
+  const [health, ai] = await Promise.all([marketHealth(), aiHealth()]);
   const marketLive =
     (config.market.provider === "finnhub" && !!config.market.finnhubKey) ||
     (config.market.provider === "alphavantage" && !!config.market.alphavantageKey);
   const rows: [string, string, boolean][] = [
     ["Agent engine", config.ai.enabled ? `${config.ai.provider} (live)` : "Simulation (no key)", config.ai.enabled],
     ["AI model", config.ai.enabled ? config.ai.model : "—", config.ai.enabled],
+    ["AI live check", ai.ok ? `OK — ${ai.detail}` : `NOT LIVE — ${ai.detail}`, ai.ok],
     ["Market data", `${config.market.provider}${marketLive ? " (configured)" : " (mock)"}`, marketLive],
     ["Live data check", health.ok ? `OK — ${health.detail}` : `NOT LIVE — ${health.detail}`, health.ok],
     ["Listing universe", config.market.listing.toUpperCase(), true],

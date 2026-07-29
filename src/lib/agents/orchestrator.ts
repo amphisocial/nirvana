@@ -54,8 +54,10 @@ function fitScore(f: Fundamentals, a: Answers): number {
 }
 
 export function selectCandidates(a: Answers, n = 12): Fundamentals[] {
+  // Small random jitter so the fallback doesn't return the identical list every
+  // run (the real variety comes from the live LLM proposal; this is a safety net).
   return universe(config.market.listing)
-    .map((f) => ({ f, s: fitScore(f, a) }))
+    .map((f) => ({ f, s: fitScore(f, a) + (Math.random() - 0.5) * 10 }))
     .sort((x, y) => y.s - x.s)
     .slice(0, n)
     .map((x) => x.f);
