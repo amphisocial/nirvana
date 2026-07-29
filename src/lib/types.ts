@@ -138,6 +138,7 @@ export interface Answers {
 export interface PortfolioRecord {
   id: string;
   createdAt: string;      // ISO
+  userEmail?: string;     // owner (set when saved by a signed-in user)
   answers: Answers;
   allocation: Allocation;
   backtest: BacktestResult;

@@ -3,52 +3,40 @@
 @tailwind utilities;
 
 :root {
-  --font-display: 'Fraunces', Georgia, serif;
+  --font-display: 'Archivo', Arial, sans-serif;
   --font-sans: 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-  --grain: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
 }
 
 @layer base {
-  body {
-    background-image: var(--grain);
-  }
-  h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.01em; }
-  ::selection { background: #B8892B; color: #F6F3EA; }
+  h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.015em; }
+  ::selection { background: #1D4ED8; color: #fff; }
+  a { text-underline-offset: 2px; }
 }
 
 @layer components {
   .eyebrow {
-    @apply font-mono text-[11px] uppercase tracking-[0.22em] text-sage;
+    @apply font-mono text-[11px] uppercase tracking-[0.18em] text-sage;
   }
-  .rule {
-    @apply h-px w-full bg-line;
-  }
+  .rule { @apply h-px w-full bg-line; }
   .card {
-    @apply rounded-xl2 border border-line bg-white/60 shadow-card;
+    @apply rounded-xl2 border border-line bg-white shadow-card;
   }
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 font-medium transition-colors;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 font-medium transition-colors;
   }
-  .btn-primary {
-    @apply btn bg-ink text-ivory hover:bg-forest;
-  }
-  .btn-brass {
-    @apply btn bg-brass text-ink hover:bg-brass2;
-  }
-  .btn-ghost {
-    @apply btn border border-ink/20 text-ink hover:bg-ink/5;
-  }
+  .btn-primary { @apply btn bg-ink text-white hover:bg-brand; }
+  .btn-brass { @apply btn bg-brand text-white hover:bg-brass2; }
+  .btn-ghost { @apply btn border border-line text-ink hover:bg-ink/5; }
   .chip {
-    @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-white/60 px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-ink/70;
+    @apply inline-flex items-center gap-1.5 rounded-md border border-line bg-white px-2.5 py-1 font-mono text-[11px] uppercase tracking-wider text-ink/70;
   }
   .tabular { font-variant-numeric: tabular-nums; }
   .container-x { @apply mx-auto w-full max-w-6xl px-5 sm:px-8; }
 }
 
-/* thin custom scrollbar for terminals */
 .term-scroll::-webkit-scrollbar { width: 8px; }
-.term-scroll::-webkit-scrollbar-thumb { background: #254A3C; border-radius: 8px; }
+.term-scroll::-webkit-scrollbar-thumb { background: #1E3A5F; border-radius: 8px; }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }

@@ -68,6 +68,32 @@ POST /api/cron/nightly
 Authorization: Bearer <CRON_SECRET>
 ```
 
+
+## Google Sign-In (gating Save)
+
+Browsing, building a portfolio, and running the agents are all open. **Saving**
+a recommendation requires signing in with Google — that's how the app remembers
+you and ties saved portfolios to your account.
+
+Set up once:
+
+1. Google Cloud Console → APIs & Services → Credentials → create an OAuth 2.0
+   Client ID (type: Web application).
+2. Add an authorized redirect URI: `<NEXTAUTH_URL>/api/auth/callback/google`
+   (e.g. `https://nirvana.athenabot.ai/api/auth/callback/google`).
+3. Put the values in `.env.local`:
+
+```
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+NEXTAUTH_URL=https://your-domain            # public URL, no trailing slash
+NEXTAUTH_SECRET=...                          # openssl rand -base64 32
+```
+
+Sessions are JWT cookies (no extra DB tables), so sign-in persists across
+restarts as long as `NEXTAUTH_SECRET` stays the same. Saved portfolios are
+stored with the owner's email and appear under **My portfolios**.
+
 ## Architecture
 
 ```

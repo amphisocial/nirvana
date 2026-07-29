@@ -10,7 +10,7 @@ export const PERSONAS: Record<AgentId, AgentPersona> = {
     title: "Head of Research",
     role: "Reads everything, then forms a thesis on each name.",
     desk: "RESEARCH",
-    accent: "#173D30",
+    accent: "#1D4ED8",
     seed: 12,
     bio: "Maya runs the research floor. She built her reputation reading 10-Ks nobody else finished, and she treats every position as a claim that has to survive contact with the evidence. Nothing enters a NIRVANA portfolio without a written thesis and a named catalyst.",
     focus: [
@@ -33,7 +33,7 @@ export const PERSONAS: Record<AgentId, AgentPersona> = {
     title: "Chief Risk Officer",
     role: "Assumes every idea can lose money, and sizes for it.",
     desk: "RISK",
-    accent: "#B23A32",
+    accent: "#DC2626",
     seed: 41,
     bio: "Marcus spent a decade on a volatility desk and has never once been surprised by a drawdown he wasn't already worried about. His job at NIRVANA is to protect capital first. He classifies each name aggressive / balanced / defensive and refuses to let conviction override position size.",
     focus: [
@@ -56,7 +56,7 @@ export const PERSONAS: Record<AgentId, AgentPersona> = {
     title: "Head of Strategy",
     role: "Runs the bull and the bear against each other, out loud.",
     desk: "DEBATE",
-    accent: "#B8892B",
+    accent: "#7C3AED",
     seed: 27,
     bio: "Sofia chairs the investment debate. She makes the strongest possible case for a stock, then the strongest possible case against it, and refuses to let the room fall in love with a story. If a thesis can't survive her cross-examination, it doesn't get funded.",
     focus: [
@@ -78,7 +78,7 @@ export const PERSONAS: Record<AgentId, AgentPersona> = {
     title: "Head of Quant Testing",
     role: "Backtests the plan before a dollar is at risk.",
     desk: "TEST",
-    accent: "#0F6E8C",
+    accent: "#0891B2",
     seed: 63,
     bio: "Ethan turns theses into numbers. He backtests every proposed allocation against a simple buy-and-hold benchmark, reports the return, the drawdown, and the Sharpe with equal weight, and calls out overfitting when he sees it. He would rather kill a strategy than flatter it.",
     focus: [
@@ -100,7 +100,7 @@ export const PERSONAS: Record<AgentId, AgentPersona> = {
     title: "Head of Portfolio Construction",
     role: "Turns research and risk into weights and share counts.",
     desk: "BUILD",
-    accent: "#2E7D46",
+    accent: "#16A34A",
     seed: 88,
     bio: "Priya assembles the final book. She takes the research theses, the risk tiers, and your goals, and translates them into a diversified allocation with real dollar amounts and share counts — never over-concentrated, always matched to the risk budget you signed off on.",
     focus: [

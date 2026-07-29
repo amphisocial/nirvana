@@ -1,6 +1,7 @@
 "use client";
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useSession, signIn } from "next-auth/react";
 import { nextQuestions, totalSteps, type Question } from "@/lib/questionnaire";
 import type { Answers, PortfolioRecord } from "@/lib/types";
 import { PERSONAS } from "@/lib/agents/personas";
@@ -25,6 +26,9 @@ const WORKING_STEPS = [
 
 export function Wizard() {
   const router = useRouter();
+  const search = useSearchParams();
+  const { status } = useSession();
+  const [resuming, setResuming] = useState(search.get("resume") === "1");
   const [answers, setAnswers] = useState<Partial<Answers>>({});
   const [multi, setMulti] = useState<string[]>([]);
   const [phase, setPhase] = useState<"interview" | "working" | "done">("interview");
@@ -70,17 +74,67 @@ export function Wizard() {
   const complete = queue.length === 0 && phase === "interview" && Object.keys(answers).length > 0;
   if (complete) build(answers as Answers);
 
-  async function saveAndTrack() {
-    if (!record) return;
+  const PENDING_KEY = "nirvana:pendingPortfolio";
+
+  async function persist(rec: PortfolioRecord): Promise<boolean> {
     const res = await fetch("/api/portfolio/save", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ record }),
+      body: JSON.stringify({ record: rec }),
     });
     if (res.ok) {
-      setSaved(true);
-      router.push(`/portfolio/${record.id}`);
+      router.push(`/portfolio/${rec.id}`);
+      return true;
     }
+    return false;
+  }
+
+  async function saveAndTrack() {
+    if (!record) return;
+    if (status !== "authenticated") {
+      // Stash the built portfolio and send the user through Google sign-in;
+      // we finish the save automatically when they return.
+      try {
+        sessionStorage.setItem(PENDING_KEY, JSON.stringify(record));
+      } catch {}
+      signIn("google", { callbackUrl: "/build?resume=1" });
+      return;
+    }
+    setSaved(true);
+    const ok = await persist(record);
+    if (!ok) { setSaved(false); setError("Could not save — please try again."); }
+  }
+
+  // Resume: after returning from Google sign-in, finish the pending save.
+  useEffect(() => {
+    if (!resuming) return;
+    if (status === "loading") return;
+    (async () => {
+      try {
+        const raw = sessionStorage.getItem(PENDING_KEY);
+        if (status === "authenticated" && raw) {
+          const rec = JSON.parse(raw) as PortfolioRecord;
+          sessionStorage.removeItem(PENDING_KEY);
+          const ok = await persist(rec);
+          if (ok) return; // navigating away
+        }
+      } catch {}
+      setResuming(false); // nothing to resume; show the interview
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, resuming]);
+
+  // ---------- RESUMING AFTER SIGN-IN ----------
+  if (resuming) {
+    return (
+      <div className="container-x py-28 text-center">
+        <div className="mx-auto max-w-sm">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-line border-t-brass" />
+          <h2 className="mt-6 font-display text-2xl font-bold">Finishing sign-in…</h2>
+          <p className="mt-1 text-sm text-sage">Saving your portfolio and opening your tracker.</p>
+        </div>
+      </div>
+    );
   }
 
   // ---------- WORKING ----------
@@ -125,7 +179,7 @@ export function Wizard() {
           </div>
           <div className="flex gap-2">
             <button onClick={saveAndTrack} className="btn-brass" disabled={saved}>
-              {saved ? "Saved ✓" : "Save & follow for a week"}
+              {saved ? "Saving…" : status === "authenticated" ? "Save & follow for a week" : "Sign in to save & follow"}
             </button>
             <button onClick={() => { setAnswers({}); setRecord(null); setPhase("interview"); setWorkStep(0); }} className="btn-ghost">
               Start over

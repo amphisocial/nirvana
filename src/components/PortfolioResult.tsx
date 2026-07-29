@@ -172,4 +172,4 @@ export function PortfolioResult({ rec }: { rec: PortfolioRecord }) {
   );
 }
 
-const PIE = ["#173D30", "#2E7D46", "#B8892B", "#0F6E8C", "#6E7F6A", "#B23A32", "#D9B25A", "#254A3C"];
+const PIE = ["#1D4ED8", "#0891B2", "#7C3AED", "#16A34A", "#64748B", "#DC2626", "#3B82F6", "#0A2540"];

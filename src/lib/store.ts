@@ -40,6 +40,19 @@ export async function listPortfolios(): Promise<PortfolioRecord[]> {
   return readJson<PortfolioRecord[]>(PORTFOLIOS, []);
 }
 
+export async function listPortfoliosByUser(email: string): Promise<PortfolioRecord[]> {
+  if (usePg) {
+    await ensureSchema();
+    const { rows } = await pool().query(
+      "SELECT data FROM nirvana_portfolios WHERE data->>'userEmail' = $1 ORDER BY created_at DESC LIMIT 200",
+      [email]
+    );
+    return rows.map((r) => r.data as PortfolioRecord);
+  }
+  const all = await listPortfolios();
+  return all.filter((p) => p.userEmail === email);
+}
+
 export async function getPortfolio(id: string): Promise<PortfolioRecord | null> {
   if (usePg) {
     await ensureSchema();

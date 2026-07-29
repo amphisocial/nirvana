@@ -24,7 +24,7 @@ export default async function Home() {
             <span className="eyebrow">NASDAQ / NYSE · Run by agents, used by humans</span>
             <h1 className="mt-5 font-display text-5xl font-black leading-[0.95] tracking-tight sm:text-6xl lg:text-7xl">
               An investment firm{" "}
-              <span className="italic text-forest">run entirely by AI.</span>
+              <span className="text-brand">run entirely by AI.</span>
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-relaxed text-ink/75">
               Five analysts research, debate, backtest and risk-check every idea — then build a

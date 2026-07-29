@@ -12,10 +12,10 @@ import {
 } from "recharts";
 import type { BacktestResult, Holding } from "@/lib/types";
 
-const GREEN = "#173D30";
+const GREEN = "#1D4ED8";
 const SAGE = "#9AA79A";
-const BRASS = "#B8892B";
-const PALETTE = ["#173D30", "#2E7D46", "#B8892B", "#0F6E8C", "#6E7F6A", "#B23A32", "#D9B25A", "#254A3C"];
+const BRASS = "#2563EB";
+const PALETTE = ["#1D4ED8", "#0891B2", "#7C3AED", "#16A34A", "#64748B", "#DC2626", "#3B82F6", "#0A2540"];
 
 export function EquityCurve({ data }: { data: BacktestResult["equityCurve"] }) {
   const fmt = (t: number) => new Date(t).getFullYear().toString();

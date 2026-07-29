@@ -5,29 +5,30 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#0C1512",       // near-black bottle green — text & dark surfaces
-        forest: "#173D30",    // brand green
-        forest2: "#0F2A21",   // deeper green
-        ivory: "#F6F3EA",     // warm paper
-        ivory2: "#EFEBDE",    // paper shade
-        brass: "#B8892B",     // premium accent
-        brass2: "#D9B25A",    // light brass
-        sage: "#6E7F6A",      // muted secondary
-        gain: "#2E7D46",
-        loss: "#B23A32",
-        line: "#D8D2C2",      // hairline on ivory
-        lineDark: "#254A3C",  // hairline on ink
+        ink: "#0A2540",       // navy — primary text & dark buttons
+        brand: "#1D4ED8",     // primary blue
+        forest: "#1D4ED8",    // (alias kept) → blue
+        forest2: "#0A2540",   // dark navy panels/footer
+        ivory: "#F6F8FB",     // app background (very light blue-gray)
+        ivory2: "#EEF2F7",    // section shade
+        brass: "#2563EB",     // accent / primary CTA (blue)
+        brass2: "#3B82F6",    // light blue
+        sage: "#64748B",      // slate secondary text
+        gain: "#16A34A",
+        loss: "#DC2626",
+        line: "#E2E8F0",      // hairline on light
+        lineDark: "#1E3A5F",  // hairline on navy
       },
       fontFamily: {
-        display: ["var(--font-display)", "Georgia", "serif"],
+        display: ["var(--font-display)", "Arial", "sans-serif"],
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
       boxShadow: {
-        card: "0 1px 0 rgba(12,21,18,0.04), 0 12px 30px -18px rgba(12,21,18,0.35)",
-        badge: "0 18px 40px -22px rgba(12,21,18,0.55)",
+        card: "0 1px 2px rgba(10,37,64,0.04), 0 8px 24px -16px rgba(10,37,64,0.25)",
+        badge: "0 18px 40px -22px rgba(10,37,64,0.45)",
       },
-      borderRadius: { xl2: "1.25rem" },
+      borderRadius: { xl2: "1rem" },
     },
   },
   plugins: [],
