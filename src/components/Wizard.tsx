@@ -259,13 +259,17 @@ export function Wizard() {
           <div className="mt-8 grid grid-cols-5 gap-2">
             {AGENTS.map((id) => {
               const st = agentStatus(id);
+              const p = PERSONAS[id];
               return (
-                <div key={id} className={`flex flex-col items-center gap-2 rounded-xl border p-3 transition-colors ${st === "done" ? "border-gain/40 bg-gain/5" : st === "active" ? "border-brand/40 bg-brand/5" : "border-line"}`}>
+                <div key={id} className={`flex flex-col items-center gap-1.5 rounded-xl border p-3 transition-colors ${st === "done" ? "border-gain/40 bg-gain/5" : st === "active" ? "border-brand/40 bg-brand/5" : "border-line"}`}>
+                  <div className="font-mono text-[9px] font-semibold uppercase tracking-[0.15em]" style={{ color: st === "queued" ? "#94A3B8" : p.accent }}>
+                    {p.desk}
+                  </div>
                   <div className={st === "active" ? "animate-pulse" : ""}>
-                    <Avatar id={id} accent={PERSONAS[id].accent} size={40} ring={st !== "queued"} />
+                    <Avatar id={id} accent={p.accent} size={38} ring={st !== "queued"} />
                   </div>
                   <div className="text-center">
-                    <div className="text-[11px] font-medium leading-tight">{PERSONAS[id].name.split(" ").slice(-1)}</div>
+                    <div className="text-[11px] font-medium leading-tight">{p.name.split(" ").slice(-1)}</div>
                     <div className={`font-mono text-[9px] uppercase ${st === "done" ? "text-gain" : st === "active" ? "text-brand" : "text-sage"}`}>
                       {st === "done" ? "done" : st === "active" ? "working" : "queued"}
                     </div>
