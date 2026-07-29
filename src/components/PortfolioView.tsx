@@ -27,7 +27,8 @@ export function PortfolioView({ initial }: { initial: PortfolioRecord }) {
   return (
     <div className="container-x py-10">
       <div className="mb-8 border-b border-line pb-6">
-        <div className="eyebrow">Saved portfolio · {rec.id}</div>
+        <a href="/saved" className="font-mono text-xs text-sage hover:text-ink">← My Portfolios</a>
+        <div className="eyebrow mt-3">Saved portfolio · {rec.id}</div>
         <h1 className="mt-1 font-display text-3xl font-black sm:text-4xl">
           Recommendation from {new Date(rec.createdAt).toLocaleDateString()}
         </h1>

@@ -4,6 +4,7 @@ import { AuthButton } from "./AuthButton";
 export function Nav() {
   const links = [
     { href: "/build", label: "Build a portfolio" },
+    { href: "/saved", label: "My Portfolios" },
     { href: "/agents", label: "The agents" },
     { href: "/about", label: "About us" },
     { href: "/admin", label: "Admin" },

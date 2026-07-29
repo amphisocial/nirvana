@@ -81,6 +81,16 @@ export async function savePortfolio(rec: PortfolioRecord): Promise<void> {
   await writeJson(PORTFOLIOS, all.slice(0, 200));
 }
 
+export async function deletePortfolio(id: string, email: string): Promise<void> {
+  if (usePg) {
+    await ensureSchema();
+    await pool().query("DELETE FROM nirvana_portfolios WHERE id = $1 AND data->>'userEmail' = $2", [id, email]);
+    return;
+  }
+  const all = await readJson<PortfolioRecord[]>(PORTFOLIOS, []);
+  await writeJson(PORTFOLIOS, all.filter((p) => !(p.id === id && p.userEmail === email)));
+}
+
 // ---------- blog ----------
 export async function listBlog(): Promise<BlogPost[]> {
   if (usePg) {
