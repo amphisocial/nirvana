@@ -36,6 +36,7 @@ export function Wizard() {
   const [seed] = useState(() => Math.floor(Math.random() * 100000));
   const [answers, setAnswers] = useState<Partial<Answers>>({});
   const [multi, setMulti] = useState<string[]>([]);
+  const [sectorPref, setSectorPref] = useState<Record<string, "want" | "avoid">>({});
   const [phase, setPhase] = useState<"interview" | "working" | "done">("interview");
   const [log, setLog] = useState<DeskEvent[]>([]);
   const [doneStages, setDoneStages] = useState<Set<string>>(new Set());
@@ -54,6 +55,24 @@ export function Wizard() {
     if (!q) return;
     setAnswers((prev) => ({ ...prev, [q.id]: value }));
     setMulti([]);
+  }
+
+  function cycleSector(s: string) {
+    setSectorPref((prev) => {
+      const cur = prev[s];
+      const next = { ...prev };
+      if (!cur) next[s] = "want";
+      else if (cur === "want") next[s] = "avoid";
+      else delete next[s];
+      return next;
+    });
+  }
+
+  function submitSectorPref() {
+    const want = Object.entries(sectorPref).filter(([, v]) => v === "want").map(([k]) => k);
+    const avoid = Object.entries(sectorPref).filter(([, v]) => v === "avoid").map(([k]) => k);
+    setAnswers((prev) => ({ ...prev, sectorsWant: want, sectorsAvoid: avoid }));
+    setSectorPref({});
   }
 
   function pushLine(stage: string, line: string, kind?: DeskEvent["kind"]) {
@@ -373,6 +392,39 @@ export function Wizard() {
                   </div>
                   <button onClick={() => answer(multi)} className="btn-primary mt-4">
                     {multi.length ? `Continue with ${multi.length} selected` : "Skip — let the desk decide"}
+                  </button>
+                </div>
+              )}
+              {q.kind === "want_avoid" && (
+                <div>
+                  <div className="mb-3 flex flex-wrap items-center gap-4 text-xs text-sage">
+                    <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-gain" /> Want</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-loss" /> Avoid</span>
+                    <span className="text-sage/70">Tap a sector to cycle: Want → Avoid → clear</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {q.options!.map((o) => {
+                      const st = sectorPref[o.value];
+                      const cls =
+                        st === "want"
+                          ? "border-gain bg-gain/10 text-gain"
+                          : st === "avoid"
+                          ? "border-loss bg-loss/10 text-loss line-through decoration-loss/50"
+                          : "border-line hover:border-brand";
+                      return (
+                        <button key={o.value} onClick={() => cycleSector(o.value)}
+                          className={`chip border transition-colors ${cls}`}>
+                          {st === "want" && <span aria-hidden>✓ </span>}
+                          {st === "avoid" && <span aria-hidden>✕ </span>}
+                          {o.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button onClick={submitSectorPref} className="btn-primary mt-4">
+                    {Object.keys(sectorPref).length
+                      ? `Continue — ${Object.values(sectorPref).filter((v) => v === "want").length} want, ${Object.values(sectorPref).filter((v) => v === "avoid").length} avoid`
+                      : "Skip — let the desk decide"}
                   </button>
                 </div>
               )}

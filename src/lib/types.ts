@@ -126,7 +126,9 @@ export interface Answers {
   goal: "growth" | "income" | "preserve" | "balanced";
   riskComfort: "low" | "medium" | "high";
   drawdownTolerance?: "5" | "15" | "30";
-  sectors?: string[];
+  sectorsWant?: string[];
+  sectorsAvoid?: string[];       // sectors to lean into (want)
+  avoidSectors?: string[];  // sectors to steer clear of
   experience?: "new" | "some" | "seasoned";
   incomeNeed?: "yes" | "no";
   existingConcentration?: "none" | "tech" | "diversified";
@@ -147,6 +149,7 @@ export interface PortfolioRecord {
   debate: DebateVerdict[];
   updates: PerformanceSnapshot[];
   engine: "ai" | "simulated";
+  session?: SessionEvent[];   // the full build workflow, for the working-papers view
 }
 
 export interface PerformanceSnapshot {
@@ -192,4 +195,9 @@ export interface MarketContext {
   breadth: "risk-on" | "mixed" | "risk-off";
   leaders: string[];   // leading sectors today
   laggards: string[];  // lagging sectors today
+}
+
+export interface SessionEvent {
+  stage: string;
+  [k: string]: any;
 }

@@ -44,7 +44,8 @@ function fitScore(f: Fundamentals, a: Answers): number {
   if (a.riskComfort === "high") s += (f.beta - 1) * 14;
   if (a.riskComfort === "low") s += (1 - f.beta) * 16;
 
-  if (a.sectors?.length) s += a.sectors.includes(f.sector) ? 18 : -6;
+  if (a.sectorsWant?.length && a.sectorsWant.includes(f.sector)) s += 20;
+  if (a.sectorsAvoid?.length && a.sectorsAvoid.includes(f.sector)) s -= 60;
   if (a.existingConcentration === "tech" && f.sector === "Technology") s -= 20;
   if (a.esg === "yes" && (f.sector === "Energy" || f.symbol === "BA")) s -= 14;
 
@@ -99,7 +100,9 @@ Propose 14 US-listed (NYSE/NASDAQ) stock candidates to research for THIS client 
 - Spread across at least 6 sectors; deliberately include some non-obvious mid-caps, not only mega-caps.
 - Reflect today's rotation and news where relevant (lean into leading themes, be cautious on laggards).
 - Match the client's goal/horizon/risk (e.g. growth → higher-beta leaders; income → durable dividend payers; preserve → low-beta defensives).
+${a.sectorsWant?.length ? `- The client WANTS exposure to: ${a.sectorsWant.join(", ")} — lean in.\n` : ""}${a.sectorsAvoid?.length ? `- The client wants to AVOID: ${a.sectorsAvoid.join(", ")} — do not propose names from these.\n` : ""}
 - Use real, currently-listed tickers only.
+${a.sectorsAvoid?.length ? `- Do NOT include any names from these sectors: ${a.sectorsAvoid.join(", ")}.` : ""}
 Return {"candidates":[{"symbol":"TICKER","reason":"one line tied to today"}]}.`,
         1800
       );
@@ -123,9 +126,15 @@ Return {"candidates":[{"symbol":"TICKER","reason":"one line tied to today"}]}.`,
   resolved.forEach((f, i) => (f ? kept.push(f) : dropped.push(symbols[i])));
   if (emit) emit({ stage: "validate", kept: kept.map((k) => k.symbol), dropped });
 
-  // De-dup and cap.
+  // De-dup, drop avoided sectors defensively, and cap.
   const seen = new Set<string>();
-  const unique = kept.filter((k) => (seen.has(k.symbol) ? false : (seen.add(k.symbol), true)));
+  const avoid = new Set((a.sectorsAvoid || []).map((x) => x.toLowerCase()));
+  const unique = kept.filter((k) => {
+    if (seen.has(k.symbol)) return false;
+    seen.add(k.symbol);
+    if (avoid.size && avoid.has(k.sector.toLowerCase())) return false;
+    return true;
+  });
   return unique.slice(0, 12);
 }
 
@@ -709,7 +718,7 @@ export function defaultAnswers(): Answers {
   return { amount: 10000, horizon: "long", goal: "balanced", riskComfort: "medium" };
 }
 function clientLine(a: Answers): string {
-  return `$${a.amount.toLocaleString()}, ${a.horizon}-term, goal=${a.goal}, risk comfort=${a.riskComfort}${a.sectors?.length ? `, sectors: ${a.sectors.join("/")}` : ""}`;
+  return `$${a.amount.toLocaleString()}, ${a.horizon}-term, goal=${a.goal}, risk comfort=${a.riskComfort}${a.sectorsWant?.length ? `, PREFER sectors: ${a.sectorsWant.join("/")}` : ""}${a.sectorsAvoid?.length ? `, AVOID sectors: ${a.sectorsAvoid.join("/")}` : ""}`;
 }
 function simThesis(f: Fundamentals, a: Answers): string {
   const g = growthTier(f);

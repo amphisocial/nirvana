@@ -3,6 +3,7 @@ import { AllocationDonut, EquityCurve } from "./Charts";
 import { GrowthBadge, RiskBadge, SectionLabel, Stat } from "./ui";
 import { Avatar } from "./Avatar";
 import { PERSONAS } from "@/lib/agents/personas";
+import { AgentWorkLog } from "./AgentWorkLog";
 
 const money = (n: number) => "$" + Math.round(n).toLocaleString();
 const pct = (n: number) => `${n > 0 ? "+" : ""}${n.toFixed(1)}%`;
@@ -168,6 +169,8 @@ export function PortfolioResult({ rec }: { rec: PortfolioRecord }) {
             })}
         </div>
       </div>
+
+      {rec.session && rec.session.length > 0 && <AgentWorkLog rec={rec} />}
     </div>
   );
 }

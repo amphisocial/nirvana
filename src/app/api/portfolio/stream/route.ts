@@ -13,7 +13,11 @@ export async function POST(req: NextRequest) {
 
   const stream = new ReadableStream({
     async start(controller) {
-      const emit = (e: unknown) => controller.enqueue(encoder.encode(JSON.stringify(e) + "\n"));
+      const events: any[] = [];
+      const emit = (e: any) => {
+        events.push(e);
+        controller.enqueue(encoder.encode(JSON.stringify(e) + "\n"));
+      };
       try {
         if (!answers?.amount) throw new Error("Missing amount");
         const result = await runFirmStream(answers, emit);
@@ -29,6 +33,8 @@ export async function POST(req: NextRequest) {
           debate: result.debate,
           updates: [],
           engine: result.engine,
+          // the full workflow, for the working-papers view (drop control events)
+          session: events.filter((e) => !["begin", "done", "error"].includes(e.stage)),
         };
         emit({ stage: "done", record });
       } catch (e: any) {

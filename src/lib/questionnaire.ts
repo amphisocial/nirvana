@@ -3,7 +3,7 @@ import { SECTORS } from "@/lib/market/universe";
 
 export interface Question {
   id: keyof Answers;
-  kind: "number" | "single" | "multi";
+  kind: "number" | "single" | "multi" | "want_avoid";
   prompt: string;
   help?: string;
   by: string; // which agent is "asking"
@@ -146,13 +146,13 @@ export function nextQuestions(a: Partial<Answers>): Question[] {
     return q;
   }
 
-  if (a.sectors == null) {
+  if (a.sectorsWant == null) {
     q.push({
-      id: "sectors",
-      kind: "multi",
+      id: "sectorsWant",
+      kind: "want_avoid",
       by: "Dr. Maya Chen",
-      prompt: "Any sectors you especially want — or want to avoid?",
-      help: "Optional. Pick any you're drawn to; leave blank to let Research decide.",
+      prompt: "Any sectors to lean into — or steer clear of?",
+      help: "Optional. Tap once to WANT a sector, again to AVOID it, again to clear. Leave blank to let Research decide.",
       options: SECTORS.map((s) => ({ value: s, label: s })),
     });
     return q;
@@ -218,9 +218,9 @@ const PHRASINGS: Record<string, string[]> = {
     "Where would you put your experience level?",
   ],
   sectors: [
-    "Any sectors you especially want — or want to avoid?",
-    "Are there parts of the market you're drawn to, or want to steer clear of?",
-    "Any industries you'd like the desk to lean into or skip?",
+    "Any sectors to lean into — or steer clear of?",
+    "Parts of the market you want more of, or none of?",
+    "Sectors to favor or avoid?",
   ],
   esg: [
     "Should the desk lean toward sustainable / ESG-friendly names?",
