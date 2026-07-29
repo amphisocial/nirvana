@@ -114,18 +114,29 @@ export async function getBlog(slug: string): Promise<BlogPost | null> {
   return all.find((p) => p.slug === slug) ?? null;
 }
 
-export async function saveBlog(post: BlogPost): Promise<void> {
+export async function saveBlog(post: BlogPost, overwrite = false): Promise<void> {
   if (usePg) {
     await ensureSchema();
+    if (overwrite) {
+      // Replace any post already dated today, so a manual refresh wins.
+      await pool().query("DELETE FROM nirvana_blog_posts WHERE date::date = $1::date", [post.date]);
+    }
     await pool().query(
       `INSERT INTO nirvana_blog_posts (slug, date, data)
        VALUES ($1, $2, $3)
-       ON CONFLICT (slug) DO NOTHING`,
+       ON CONFLICT (slug) DO ${overwrite ? "UPDATE SET date = EXCLUDED.date, data = EXCLUDED.data" : "NOTHING"}`,
       [post.slug, post.date, post]
     );
     return;
   }
   const all = await readJson<BlogPost[]>(BLOG, []);
+  if (overwrite) {
+    const day = post.date.slice(0, 10);
+    const filtered = all.filter((p) => p.date.slice(0, 10) !== day);
+    filtered.unshift(post);
+    await writeJson(BLOG, filtered.slice(0, 120));
+    return;
+  }
   if (all.some((p) => p.slug === post.slug)) return;
   all.unshift(post);
   await writeJson(BLOG, all.slice(0, 120));
