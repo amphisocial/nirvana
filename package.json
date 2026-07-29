@@ -1,34 +1,32 @@
 {
-  "name": "nirvana-financial-planner",
-  "version": "1.1.1",
+  "name": "nirvana",
+  "version": "1.0.0",
   "private": true,
-  "type": "module",
-  "description": "Nirvana personal finance, retirement, agentic portfolio, real-estate, and scenario planning platform.",
-  "engines": {
-    "node": ">=20"
-  },
+  "description": "NIRVANA \u2014 an AI-run investment firm. Five agent employees research, debate, test, risk-check and build a US-equity portfolio for you.",
   "scripts": {
-    "dev": "node --watch server/index.js",
-    "start": "node server/index.js",
-    "db:migrate": "node scripts/migrate.js",
-    "db:seed": "node scripts/seed-demo.js",
-    "test": "node --test tests/*.test.js"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "seed:blog": "node scripts/seed-blog.mjs",
+    "db:migrate": "node scripts/migrate.mjs"
   },
   "dependencies": {
-    "connect-pg-simple": "^10.0.0",
-    "csv-parse": "^5.6.0",
-    "dotenv": "^16.6.1",
-    "express": "^5.1.0",
-    "express-rate-limit": "^8.0.1",
-    "express-session": "^1.18.2",
-    "helmet": "^8.1.0",
-    "multer": "^2.0.2",
-    "nodemailer": "^9.0.3",
-    "openai": "^5.12.2",
-    "passport": "^0.7.0",
-    "passport-google-oauth20": "^2.0.0",
-    "pg": "^8.16.3",
-    "stripe": "^18.4.0",
-    "zod": "^3.25.76"
+    "@anthropic-ai/sdk": "^0.32.1",
+    "next": "14.2.15",
+    "pg": "^8.22.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.13.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.20.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.14",
+    "typescript": "^5.5.4"
   }
 }

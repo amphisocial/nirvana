@@ -1,82 +1,85 @@
-# Nirvana scheduled-agent controls
+# NIRVANA — the AI investment firm
 
-Built against `amphisocial/nirvana` main commit:
+An investment firm **run entirely by AI**. Five agent "employees" research, debate,
+backtest and risk-check US equities, then build a portfolio around one number: yours.
+Built with Next.js 14 (App Router), TypeScript, Tailwind, Recharts and the Anthropic SDK.
 
-`c79083521f2bc37bd6c826bc7c49a9963085c939`
+> Educational tool only. Not investment, tax, or legal advice.
 
-## Immediate emergency stop
+## What it does
 
-Before deploying code, you can stop all in-process scheduled workflows,
-including the Financial Center and Trading Desk, by setting this in the
-production `.env`:
+- **Build a portfolio** — an adaptive intake interview (questions branch on your answers,
+  the way a real analyst probes) → the whole firm runs → a diversified NASDAQ/NYSE book with
+  dollar amounts, share counts, an allocation donut, and a 5-year backtest vs the S&P 500.
+- **Talk to one analyst at a time** — pick an employee, drop in a ticker, run *their* analysis
+  on that single name, or just chat with them.
+- **Save & follow** — save any recommendation and the operations analyst (Leo) re-prices it on
+  demand, reporting total gain/loss from the day-one base value.
+- **Homepage** — the night desk's daily "Analyst of the Day" post, top 3 headlines, and the
+  day's top 5 gainers/losers.
+- **About Us** — the five agents presented as a human leadership team.
+- **Admin** — the only human in the loop; toggles + a manual nightly trigger.
 
-```dotenv
-AGENT_SCHEDULER_ENABLED=false
-```
+## The five agents (+ ops)
 
-Then reload PM2:
+| Agent | Employee | Job |
+|------|----------|-----|
+| `researcher` | Dr. Maya Chen | Thesis, catalysts, growth tier (high/med/low) |
+| `risk` | Marcus Reed | Volatility, beta, drawdown, risk tier |
+| `debater` | Sofia Alvarez | Bull vs bear, net conviction |
+| `tester` | Ethan Brooks | Backtest vs S&P 500 |
+| `optimizer` | Priya Nair | Weights, dollars, share counts |
+| `updater` (ops) | Leo Whitfield | On-demand gain/loss refresh |
+
+## Runs with zero keys
+
+Out of the box it uses a **deterministic mock market feed** and a **rule-based "simulated analyst"
+engine**, so everything works offline. Add keys to go live — the LLM handles judgment and
+narrative, while all numbers (volatility, drawdown, Sharpe, share counts) are always computed in
+code so they're never hallucinated.
+
+## Setup
 
 ```bash
-pm2 restart nirvana --update-env
-```
-
-## Apply the code patch
-
-From the root of your local Nirvana checkout:
-
-```bash
-bash /path/to/this-folder/apply.sh .
 npm install
-npm run db:migrate
-npm test
-git add .
-git commit -m "Add scheduled agent pause controls"
-git push
+cp .env.example .env.local     # optional — app runs without it
+npm run seed:blog              # optional — seeds a few homepage posts
+npm run dev                    # http://localhost:3000
 ```
 
-On EC2:
+### Going live (all optional)
 
-```bash
-cd /opt/apps/nirvana
-git pull
-npm install --omit=dev
-npm run db:migrate
-pm2 restart nirvana --update-env
-pm2 logs nirvana --lines 100
+```
+ANTHROPIC_API_KEY=...          # agents reason with Claude instead of the sim engine
+MARKET_DATA_PROVIDER=finnhub
+FINNHUB_API_KEY=...            # live quotes + news (free tier)
+MARKET_LISTING=both            # nasdaq | nyse | both
+NIGHTLY_ENABLED=true           # admin toggle for the nightly blog run
+CRON_SECRET=...                # protects POST /api/cron/nightly
 ```
 
-Run the migration before restarting because the scheduler reads the new
-`household_agent_settings` table.
+Schedule the nightly post from any scheduler:
 
-## What users see
-
-In **Insights**, the household owner gets two switches:
-
-- Nightly Financial Center
-- Weekly Financial Center
-
-The owner can save either switch independently or click **Pause both**.
-Shared members can see status but cannot change it. Manual runs still work.
-
-Trading Desk overnight automation remains separately controlled under
-**Holdings → Trading Desk → Settings**.
-
-## Server-wide controls
-
-```dotenv
-AGENT_SCHEDULER_ENABLED=true
-AGENT_NIGHTLY_ENABLED=true
-AGENT_WEEKLY_ENABLED=true
+```
+POST /api/cron/nightly
+Authorization: Bearer <CRON_SECRET>
 ```
 
-`AGENT_SCHEDULER_ENABLED=false` overrides everything and stops all scheduled
-workflows. The nightly and weekly flags independently disable those Financial
-Center schedules across every household.
+## Architecture
 
-## Rollback
-
-```bash
-git apply -R nirvana-agent-scheduler-controls.patch
+```
+src/lib/agents/       personas, prompts, orchestrator (the firm), updater
+src/lib/market/       provider facade, finnhub, deterministic mock, universe, analytics
+src/lib/store.ts      file-based JSON store (data/*.json) — swap for a DB in prod
+src/app/api/          portfolio, agents, market, cron routes
+src/components/       Wizard, AgentConsole, PortfolioView, Charts, Avatars, ...
 ```
 
-If the migration has already run, leaving the new table in place is harmless.
+Data persists to `data/portfolios.json` and `data/blog.json`. For multi-instance
+deploys, replace `src/lib/store.ts` with Postgres/Redis — the interface is tiny.
+
+## Phase 2 (designed for, not yet built)
+
+Each persona's `focus` (skills) and `method` (steps) are hardcoded from desk best-practice.
+The types and prompt builder are structured so a per-user override — appended to an agent's
+system prompt and saved per account — drops in without touching the orchestrator.
