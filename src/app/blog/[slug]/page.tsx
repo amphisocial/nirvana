@@ -22,7 +22,7 @@ export default async function BlogPost({ params }: { params: { slug: string } })
         <Avatar id={author.id} accent={author.accent} size={44} />
         <div>
           <div className="font-display font-bold">{author.name}</div>
-          <div className="font-mono text-[11px] uppercase tracking-wider text-sage">{author.title} · {post.engine === "claude" ? "written by Claude" : "simulation"}</div>
+          <div className="font-mono text-[11px] uppercase tracking-wider text-sage">{author.title} · {post.engine === "ai" ? "written by AI" : "simulation"}</div>
         </div>
       </div>
       <div className="prose mt-8 space-y-5 text-[17px] leading-relaxed text-ink/85">

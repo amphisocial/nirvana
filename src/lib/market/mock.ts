@@ -1,4 +1,4 @@
-import type { Candle, Quote } from "@/lib/types";
+import type { Candle, NewsItem, Quote } from "@/lib/types";
 import { findMeta } from "./universe";
 
 // Deterministic pseudo-random from a string seed so charts/quotes are
@@ -75,7 +75,7 @@ const NEWS = [
   { h: "Volatility index eases as macro fears cool", s: "Reuters" },
 ];
 
-export function mockNews(limit = 3) {
+export function mockNews(limit = 3): NewsItem[] {
   const day = new Date().toISOString().slice(0, 10);
   const r = rng(hash(day));
   const pool = [...NEWS].sort(() => r() - 0.5);

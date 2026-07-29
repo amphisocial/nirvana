@@ -1,4 +1,4 @@
-import type { Candle, Quote } from "@/lib/types";
+import type { Candle, NewsItem, Quote } from "@/lib/types";
 import { config } from "@/lib/config";
 import { findMeta } from "./universe";
 import { mockHistory, mockNews, mockQuote } from "./mock";
@@ -46,7 +46,7 @@ export async function finnhubHistory(symbol: string, days = 1260): Promise<Candl
   }
 }
 
-export async function finnhubNews(limit = 3) {
+export async function finnhubNews(limit = 3): Promise<NewsItem[]> {
   try {
     const items = await fh("/news", { category: "general" });
     if (!Array.isArray(items) || !items.length) throw new Error("empty");

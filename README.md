@@ -50,7 +50,10 @@ npm run dev                    # http://localhost:3000
 ### Going live (all optional)
 
 ```
-ANTHROPIC_API_KEY=...          # agents reason with Claude instead of the sim engine
+# Agents (pick one provider; AI_MODEL must match it)
+AI_PROVIDER=anthropic          # anthropic | openai | gemini | mock
+AI_MODEL=claude-sonnet-4-6     # openai -> gpt-4o-mini, gemini -> gemini-1.5-flash
+ANTHROPIC_API_KEY=...          # or OPENAI_API_KEY / GEMINI_API_KEY
 MARKET_DATA_PROVIDER=finnhub
 FINNHUB_API_KEY=...            # live quotes + news (free tier)
 MARKET_LISTING=both            # nasdaq | nyse | both

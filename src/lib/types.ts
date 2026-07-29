@@ -145,7 +145,7 @@ export interface PortfolioRecord {
   risk: RiskAssessment[];
   debate: DebateVerdict[];
   updates: PerformanceSnapshot[];
-  engine: "claude" | "simulated";
+  engine: "ai" | "simulated";
 }
 
 export interface PerformanceSnapshot {
@@ -172,5 +172,13 @@ export interface BlogPost {
   pick: { symbol: string; name: string; growthTier: GrowthTier };
   body: string[];         // paragraphs
   author: AgentId;
-  engine: "claude" | "simulated";
+  engine: "ai" | "simulated";
+}
+
+export interface NewsItem {
+  id: string;
+  headline: string;
+  source: string;
+  url: string;
+  datetime: number;
 }

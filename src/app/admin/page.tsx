@@ -1,13 +1,16 @@
-import { config, engineName } from "@/lib/config";
+import { config } from "@/lib/config";
 import { NightlyTrigger } from "@/components/AdminControls";
 import { SectionLabel } from "@/components/ui";
 export const dynamic = "force-dynamic";
 
 export default function AdminPage() {
+  const marketLive =
+    (config.market.provider === "finnhub" && !!config.market.finnhubKey) ||
+    (config.market.provider === "alphavantage" && !!config.market.alphavantageKey);
   const rows: [string, string, boolean][] = [
-    ["Agent engine", engineName() === "claude" ? "Claude (live)" : "Simulation (no key)", config.ai.enabled],
-    ["AI model", config.ai.model, config.ai.enabled],
-    ["Market data", `${config.market.provider}${config.market.provider === "finnhub" && config.market.finnhubKey ? " (live)" : " (mock)"}`, config.market.provider === "finnhub" && !!config.market.finnhubKey],
+    ["Agent engine", config.ai.enabled ? `${config.ai.provider} (live)` : "Simulation (no key)", config.ai.enabled],
+    ["AI model", config.ai.enabled ? config.ai.model : "—", config.ai.enabled],
+    ["Market data", `${config.market.provider}${marketLive ? " (live)" : " (mock)"}`, marketLive],
     ["Listing universe", config.market.listing.toUpperCase(), true],
     ["Nightly blog run", config.nightly.enabled ? "ENABLED" : "DISABLED", config.nightly.enabled],
     ["Cron secret set", config.nightly.secret ? "yes" : "no", !!config.nightly.secret],

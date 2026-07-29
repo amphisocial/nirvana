@@ -23,12 +23,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ reply });
     }
     const convo = messages.map((m) => `${m.role === "user" ? "Client" : persona.name}: ${m.content}`).join("\n");
-    const reply = await ask(
-      CHAT_SYSTEM(agentId),
-      `${symbol ? `The client is asking about ${symbol}. ` : ""}Continue this conversation as ${persona.name}.\n\n${convo}\n\n${persona.name}:`,
-      900
-    );
-    return NextResponse.json({ reply });
+    try {
+      const reply = await ask(
+        CHAT_SYSTEM(agentId),
+        `${symbol ? `The client is asking about ${symbol}. ` : ""}Continue this conversation as ${persona.name}.\n\n${convo}\n\n${persona.name}:`,
+        900
+      );
+      return NextResponse.json({ reply });
+    } catch {
+      // Provider/network hiccup — degrade to the simulated reply, never 500.
+      const reply = `I'm ${persona.name}, ${persona.title}. ${simReply(agentId, last, symbol)}`;
+      return NextResponse.json({ reply });
+    }
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? "Failed" }, { status: 500 });
   }

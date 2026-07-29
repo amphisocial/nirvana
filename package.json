@@ -2,7 +2,7 @@
   "name": "nirvana",
   "version": "1.0.0",
   "private": true,
-  "description": "NIRVANA \u2014 an AI-run investment firm. Five agent employees research, debate, test, risk-check and build a US-equity portfolio for you.",
+  "description": "NIRVANA — an AI-run investment firm. Five agent employees research, debate, test, risk-check and build a US-equity portfolio for you.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -14,6 +14,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
     "next": "14.2.15",
+    "openai": "^4.104.0",
     "pg": "^8.22.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

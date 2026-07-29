@@ -120,7 +120,7 @@ export function Wizard() {
             <h1 className="mt-1 font-display text-3xl font-black sm:text-4xl">Your portfolio is ready</h1>
             <p className="mt-1 text-sm text-sage">
               Built for {record.answers.goal} · {record.answers.horizon}-term · {record.answers.riskComfort} risk ·
-              {record.engine === "claude" ? " powered by Claude" : " simulation mode"}
+              {record.engine === "ai" ? " powered by AI" : " simulation mode"}
             </p>
           </div>
           <div className="flex gap-2">
