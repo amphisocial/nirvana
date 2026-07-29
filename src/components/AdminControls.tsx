@@ -1,8 +1,7 @@
 "use client";
 import { useState } from "react";
 
-export function NightlyTrigger({ secretRequired }: { secretRequired: boolean }) {
-  const [secret, setSecret] = useState("");
+export function NightlyTrigger() {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -11,7 +10,6 @@ export function NightlyTrigger({ secretRequired }: { secretRequired: boolean }) 
     try {
       const qs = new URLSearchParams();
       if (force) qs.set("force", "1");
-      if (secretRequired && secret) qs.set("secret", secret);
       const res = await fetch(`/api/cron/nightly?${qs.toString()}`, { method: "POST" });
       const data = await res.json();
       setStatus(
@@ -35,10 +33,6 @@ export function NightlyTrigger({ secretRequired }: { secretRequired: boolean }) 
         Runs the "Analyst of the Day" now and replaces today's post — works even if the nightly job is disabled.
         The homepage market data (movers, headlines) already refreshes on every page load.
       </p>
-      {secretRequired && (
-        <input value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="CRON_SECRET"
-          className="mt-3 w-full rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none focus:border-brand" />
-      )}
       <div className="mt-3 flex flex-wrap gap-2">
         <button onClick={() => run(true)} disabled={busy} className="btn-brass disabled:opacity-50">
           {busy ? "Running…" : "Refresh Analyst of the Day"}

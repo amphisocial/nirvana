@@ -49,9 +49,23 @@ export const config = {
     enabled: (process.env.NIGHTLY_ENABLED || "true").toLowerCase() === "true",
     secret: process.env.CRON_SECRET || "",
   },
-  admin: { email: process.env.ADMIN_EMAIL || "admin@nirvana.capital" },
+  admin: {
+    // Comma-separated Google emails allowed into /admin. Falls back to the
+    // single ADMIN_EMAIL. If empty, admin is locked until you set it.
+    emails: (process.env.ADMIN_EMAILS || process.env.ADMIN_EMAIL || "")
+      .split(",")
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean),
+  },
 };
 
 // "ai" when any real LLM provider is active, "simulated" otherwise.
 export const engineName = (): "ai" | "simulated" =>
   config.ai.enabled ? "ai" : "simulated";
+
+export function isAdmin(email?: string | null): boolean {
+  return Boolean(email) && config.admin.emails.includes((email as string).toLowerCase());
+}
+export function adminConfigured(): boolean {
+  return config.admin.emails.length > 0;
+}

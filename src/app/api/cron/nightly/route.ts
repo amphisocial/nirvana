@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { config } from "@/lib/config";
+import { config, isAdmin } from "@/lib/config";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { dailyPick } from "@/lib/agents/orchestrator";
 import { saveBlog } from "@/lib/store";
 
@@ -16,9 +18,13 @@ export async function POST(req: NextRequest) {
   if (!config.nightly.enabled && !force) {
     return NextResponse.json({ skipped: true, reason: "NIGHTLY_ENABLED is false (use force=1 to refresh manually)" });
   }
+  // Authorize: a signed-in admin (the button) OR a valid CRON_SECRET (schedulers).
+  const session = await getServerSession(authOptions);
+  const admin = isAdmin(session?.user?.email);
   const auth = req.headers.get("authorization") || "";
   const secret = req.nextUrl.searchParams.get("secret") || auth.replace("Bearer ", "");
-  if (config.nightly.secret && secret !== config.nightly.secret) {
+  const secretOk = !config.nightly.secret || secret === config.nightly.secret;
+  if (!admin && !secretOk) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const post = await dailyPick();
